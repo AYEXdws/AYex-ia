@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: ayex-ia
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_server.py
+    envVars:
+      - key: AYEX_WEB_MVP_ONLY
+        value: "true"
+      - key: OPENCLAW_ENABLED
+        value: "true"
+      - key: OPENCLAW_BASE_URL
+        sync: false
+      - key: OPENCLAW_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENCLAW_MODE
+        value: openai_chat_completions
+      - key: OPENCLAW_MODEL
+        value: openai/gpt-4o-mini
+      - key: OPENCLAW_MAX_OUTPUT_TOKENS
+        value: "80"
+      - key: OPENCLAW_INSTRUCTIONS
+        value: "Her zaman Turkce cevap ver. Kisa, net ve dogal yaz. En fazla 3 cumle kullan."

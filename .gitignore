@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.venv/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Local runtime artifacts
+*.log
+/tmp/
+.ayex/
+
+# Large local OpenClaw source clone (not needed for AYEX app deploy repo)
+openclaw/
