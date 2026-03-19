@@ -23,13 +23,15 @@ class IntelService:
         category: str,
         importance: int,
         source: str,
+        timestamp: datetime | None = None,
         tags: list[str] | None = None,
-    ) -> IntelEvent:
+    ) -> IntelEvent | None:
         event = IntelEvent(
             title=title.strip(),
             summary=summary.strip(),
-            category=category.strip() or "general",
+            category=category.strip() or "other",
             importance=max(1, min(10, int(importance))),
+            timestamp=timestamp or datetime.utcnow(),
             source=source.strip() or "internal",
             tags=tags or [],
         )
@@ -39,6 +41,57 @@ class IntelService:
         event.confidence_score = score["confidence_score"]
         event.final_score = score["final_score"]
         return self.store.add_event(event)
+
+    def validate_event_payload(self, payload: dict) -> dict:
+        allowed_categories = {"economy", "security", "tech", "global", "other"}
+        title = str(payload.get("title") or "").strip()
+        summary = str(payload.get("summary") or "").strip()
+        if len(title) < 5:
+            raise ValueError("title_invalid")
+        if len(summary) < 10:
+            raise ValueError("summary_invalid")
+
+        category = str(payload.get("category") or "other").strip().lower()
+        if category not in allowed_categories:
+            category = "other"
+
+        importance_raw = payload.get("importance", 5)
+        try:
+            importance = int(float(importance_raw))
+        except (TypeError, ValueError):
+            importance = 5
+        importance = max(1, min(10, importance))
+
+        tags_raw = payload.get("tags")
+        tags: list[str] = []
+        if isinstance(tags_raw, list):
+            for item in tags_raw:
+                val = str(item or "").strip().lower()
+                if not val:
+                    continue
+                tags.append(val[:24])
+                if len(tags) >= 5:
+                    break
+
+        source = str(payload.get("source") or "unknown").strip() or "unknown"
+        ts_raw = payload.get("timestamp")
+        ts = datetime.utcnow()
+        if isinstance(ts_raw, str) and ts_raw.strip():
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+            except ValueError:
+                ts = datetime.utcnow()
+
+        return {
+            "source": source,
+            "type": str(payload.get("type") or "generic").strip() or "generic",
+            "title": title,
+            "summary": summary,
+            "category": category,
+            "importance": importance,
+            "tags": tags,
+            "timestamp": ts,
+        }
 
     def calculate_score(self, event: IntelEvent) -> dict:
         importance_score = max(0.1, min(1.0, float(event.importance) / 10.0))

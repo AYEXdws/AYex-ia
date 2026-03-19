@@ -10,7 +10,7 @@ class IntelEvent:
     id: str = field(default_factory=lambda: uuid4().hex)
     title: str = ""
     summary: str = ""
-    category: str = "general"
+    category: str = "other"
     importance: int = 5
     timestamp: datetime = field(default_factory=datetime.utcnow)
     source: str = "internal"
