@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from backend.src.intel.event_model import IntelEvent
 from backend.src.intel.intel_store import IntelStore
@@ -58,6 +59,7 @@ class IntelService:
     def analyze_event(self, event: IntelEvent) -> dict:
         if self.openai_client is None:
             return self._fallback_analysis(event, reason="openai_client_missing")
+        logger.info("MODEL_SELECTED model=%s mode=%s reason=%s", "gpt-4o-mini", "intel_analysis", "event_analysis")
         prompt = (
             "Analyze this event:\n"
             "- Why is it important?\n"
@@ -91,30 +93,80 @@ class IntelService:
             logger.error("INTEL_ANALYZE_ERROR event_id=%s error=%s", event.id, exc)
             return self._fallback_analysis(event, reason="openai_error")
 
-    def get_daily_brief(self) -> dict:
-        top = self.store.get_top_events(limit=3)
-        items = [
-            {
-                "event": {
-                    "id": e.id,
-                    "title": e.title,
-                    "summary": e.summary,
-                    "category": e.category,
-                    "importance": e.importance,
-                    "timestamp": e.timestamp.isoformat(),
-                    "source": e.source,
-                    "tags": e.tags,
-                },
-                "score": {
-                    "final": e.final_score,
-                    "importance": e.importance_score,
-                    "urgency": e.urgency_score,
-                },
-                "analysis": self.analyze_event(e),
-            }
-            for e in top
-        ]
-        return {"top_events": items, "count": len(self.store.get_all_events())}
+    def should_analyze(self, event: IntelEvent) -> bool:
+        if float(event.final_score) < 0.5:
+            return False
+        if float(event.importance_score) < 0.4:
+            return False
+        if str(event.category or "").strip().lower() == "low":
+            return False
+        return True
+
+    def filter_by_user_profile(self, events: list[IntelEvent], user_id: str) -> list[IntelEvent]:
+        # Placeholder for future user-specific category/interest filtering.
+        _ = user_id
+        return list(events)
+
+    def build_insight(self, event: IntelEvent, analysis: dict) -> dict:
+        return {
+            "title": event.title,
+            "summary": event.summary,
+            "importance": analysis.get("importance_reason", ""),
+            "impact": analysis.get("impact", ""),
+            "action": analysis.get("action", "monitor"),
+            "score": event.final_score,
+            "tags": event.tags,
+        }
+
+    def generate_daily_brief(self, insights: list[dict]) -> str:
+        if not insights:
+            return "No high-priority intelligence insights for today."
+        if self.openai_client is None:
+            return self._fallback_daily_brief(insights, reason="openai_client_missing")
+        logger.info("MODEL_SELECTED model=%s mode=%s reason=%s", "gpt-4o-mini", "intel_brief", "daily_brief_summary")
+        prompt = (
+            "Summarize the most important global events into a short intelligence brief.\n\n"
+            f"Insights: {json.dumps(insights[:3], ensure_ascii=False)}"
+        )
+        try:
+            res = self.openai_client.call_responses(
+                prompt=prompt,
+                model="gpt-4o-mini",
+                instructions="Sharp analytical tone, no fluff, keep it under 120 tokens.",
+                max_output_tokens=120,
+                route_name="intel_daily_brief",
+            )
+            text = (res.text or "").strip()
+            if not text:
+                return self._fallback_daily_brief(insights, reason="empty_model_brief")
+            logger.info("DAILY_BRIEF_CREATED source=model length=%s", len(text))
+            return text
+        except Exception as exc:
+            logger.error("INTEL_DAILY_BRIEF_ERROR error=%s", exc)
+            return self._fallback_daily_brief(insights, reason="openai_error")
+
+    def get_daily_brief(self, user_id: str = "default") -> dict:
+        events = self.store.get_all_events()
+        scored = sorted(events, key=lambda e: float(e.final_score), reverse=True)
+        user_filtered = self.filter_by_user_profile(scored, user_id=user_id)
+        filtered = [e for e in user_filtered if self.should_analyze(e)]
+        filtered_out_count = max(0, len(user_filtered) - len(filtered))
+        logger.info("FILTERED_OUT_COUNT value=%s", filtered_out_count)
+        selected = filtered[:3]
+        logger.info("ANALYZED_EVENT_COUNT value=%s", len(selected))
+
+        insights: list[dict] = []
+        for event in selected:
+            analysis = self.analyze_event(event)
+            insights.append(self.build_insight(event, analysis))
+
+        daily_brief = self.generate_daily_brief(insights)
+        return {
+            "insights": insights,
+            "daily_brief": daily_brief,
+            "count": len(insights),
+            "generated_at": datetime.utcnow().isoformat(),
+        }
 
     def _parse_analysis_json(self, text: str) -> dict | None:
         raw = (text or "").strip()
@@ -153,3 +205,10 @@ class IntelService:
             "impact": "Potential impact exists; manual review recommended.",
             "action": action,
         }
+
+    def _fallback_daily_brief(self, insights: list[dict], reason: str) -> str:
+        top = insights[:3]
+        bullets = [f"- {item.get('title', 'Event')}: {item.get('action', 'monitor')}" for item in top]
+        text = f"Intel brief fallback ({reason}):\n" + "\n".join(bullets)
+        logger.info("DAILY_BRIEF_CREATED source=fallback length=%s", len(text))
+        return text
