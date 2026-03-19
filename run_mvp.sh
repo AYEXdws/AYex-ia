@@ -34,11 +34,15 @@ if [[ -z "${OPENAI_API_KEY:-}" && -z "${AYEX_API_KEY:-}" ]]; then
   exit 1
 fi
 
-echo "[MVP] OpenClaw kontrol: ${OPENCLAW_BASE_URL}"
-if ! curl -fsS --max-time 3 "${OPENCLAW_BASE_URL}" >/dev/null 2>&1; then
-  echo "Hata: OpenClaw gateway ulasilamiyor (${OPENCLAW_BASE_URL})."
-  echo "OpenClaw servisini baslatip tekrar dene."
-  exit 1
+if [[ "${OPENCLAW_ENABLED}" == "true" ]]; then
+  echo "[MVP] OpenClaw kontrol: ${OPENCLAW_BASE_URL}"
+  if ! curl -fsS --max-time 3 "${OPENCLAW_BASE_URL}" >/dev/null 2>&1; then
+    echo "Hata: OpenClaw gateway ulasilamiyor (${OPENCLAW_BASE_URL})."
+    echo "OpenClaw servisini baslatip tekrar dene veya OPENCLAW_ENABLED=false kullan."
+    exit 1
+  fi
+else
+  echo "[MVP] OpenClaw devre disi: dogrudan OpenAI istemcisi kullanilacak."
 fi
 
 echo "[MVP] Backend baslatiliyor: http://127.0.0.1:${AYEX_PORT:-8000}"

@@ -6,7 +6,9 @@ This refactor preserves the working prototype behavior while reorganizing the co
 
 ## Runtime mode
 
-- OpenClaw is the primary/only text reasoning engine.
+- Text reasoning engine is selectable:
+  - `OPENCLAW_ENABLED=true`: OpenClaw bridge path
+  - `OPENCLAW_ENABLED=false`: direct OpenAI path (no OpenClaw request)
 - Web MVP default: `AYEX_WEB_MVP_ONLY=true` (only web/chat/action/health routes are active).
 - Jarvis-style web console includes persistent chat sessions and profile-aware responses.
 - Voice/ESP32 routes stay available for later phases by setting `AYEX_WEB_MVP_ONLY=false`.
@@ -72,6 +74,7 @@ Environment:
 - `OPENAI_API_KEY` or `AYEX_API_KEY` (required)
 - optional: `AYEX_API_BASE_URL`, `AYEX_STT_MODEL`, `AYEX_TTS_MODEL`, `AYEX_DEFAULT_VOICE`
 - OpenClaw bridge: `OPENCLAW_ENABLED=true`, `OPENCLAW_BASE_URL=http://127.0.0.1:18789`, `OPENCLAW_API_KEY=...`
+- Direct OpenAI mode: `OPENCLAW_ENABLED=false` (OpenClaw gateway kontrolu/istegi yapilmaz)
 - OpenClaw mode: `OPENCLAW_MODE=openai_chat_completions`
 - OpenClaw model lock: `OPENCLAW_MODEL=openai/gpt-4o-mini`, `OPENCLAW_FORCE_MODEL=true`
 - OpenClaw output budget: `OPENCLAW_MAX_OUTPUT_TOKENS=80`
@@ -140,6 +143,19 @@ Tokenlar:
 
 - Script, webhook/cron tokenlarini `~/.openclaw/ayex-integration.tokens` dosyasina yazar.
 - OpenClaw config dosyasinin timestampli yedegi de otomatik olusturulur.
+
+## Direct OpenAI mode (OpenClaw off)
+
+OpenClaw timeout/bridge bagimliligini gecici kapatmak icin:
+
+```bash
+export OPENCLAW_ENABLED=false
+./run_mvp.sh
+```
+
+Bu modda:
+- `/chat` ve `/action` dogrudan OpenAI istemcisi ile calisir.
+- `localhost:18789` kontrolu/istegi yapilmaz.
 
 ## ESP32 PlatformIO run
 

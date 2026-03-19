@@ -976,5 +976,9 @@ def web_chat() -> str:
   </script>
 </body>
 </html>"""
-    openclaw_model = (os.environ.get("OPENCLAW_MODEL") or "openai/gpt-4o-mini").strip()
-    return html.replace("__OPENCLAW_MODEL__", openclaw_model).replace("__OPENCLAW_MODEL__", openclaw_model)
+    openclaw_enabled_raw = (os.environ.get("OPENCLAW_ENABLED") or "true").strip().lower()
+    if openclaw_enabled_raw in {"1", "true", "yes", "on"}:
+      expected_model = (os.environ.get("OPENCLAW_MODEL") or "openai/gpt-4o-mini").strip()
+    else:
+      expected_model = (os.environ.get("AYEX_CHAT_MODEL") or "gpt-4.1-mini").strip()
+    return html.replace("__OPENCLAW_MODEL__", expected_model).replace("__OPENCLAW_MODEL__", expected_model)

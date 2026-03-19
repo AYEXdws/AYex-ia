@@ -57,7 +57,7 @@ class ResponseOrchestrator:
             )
 
         result = self.openclaw_service.run_action(transcript, workspace=workspace, model=model)
-        reply = result.text if result.ok else "OpenClaw yaniti alinamadi."
+        reply = result.text if result.ok else "Yanit alinamadi."
 
         wav_reply = self.tts_service.synthesize_wav_bytes(reply or "Ahmet, seni duydum.", voice=voice)
         return AudioTurnResult(

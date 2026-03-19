@@ -76,7 +76,7 @@ class MessageInfo(BaseModel):
     ts: str
     role: str
     text: str
-    source: str = "openclaw"
+    source: str = "ai"
     latency_ms: Optional[int] = None
     metrics: Dict[str, Any] = Field(default_factory=dict)
 

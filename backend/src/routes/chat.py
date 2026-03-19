@@ -11,6 +11,7 @@ router = APIRouter()
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)) -> ChatResponse:
+    ai_source = "openclaw" if services.settings.openclaw_enabled else "openai"
     text = (payload.text or "").strip()
     if not text:
         return ChatResponse(reply="Bos mesaj gonderilemez.", session_id=payload.session_id or "", metrics={"ok": False})
@@ -30,7 +31,7 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
         max_age_sec=services.settings.openclaw_cache_ttl_sec,
     )
     if dedup is not None:
-        reply = str(dedup.get("text") or "").strip() or "OpenClaw yanit uretemedi."
+        reply = str(dedup.get("text") or "").strip() or "Yanit uretemedi."
         prev_metrics = dedup.get("metrics") or {}
         prev_ok = bool(prev_metrics.get("ok", True))
         services.chat_store.append_message(session.id, role="user", text=text, source="user")
@@ -38,7 +39,7 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
             session.id,
             role="assistant",
             text=reply,
-            source="openclaw",
+            source=ai_source,
             latency_ms=0,
             metrics={"cache_hit": True, "duplicate": True, "ok": prev_ok},
         )
@@ -46,13 +47,13 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
             reply=reply,
             session_id=session.id,
             metrics={
-                "source": "openclaw",
+                "source": ai_source,
                 "ok": prev_ok,
                 "latency_ms": 0,
                 "cache_hit": True,
                 "memory_hits": 0,
-                "used_model": prev_metrics.get("used_model", services.settings.openclaw_model),
-                "model_locked": services.settings.openclaw_force_model,
+                "used_model": prev_metrics.get("used_model", ""),
+                "model_locked": bool(prev_metrics.get("model_locked", False)),
             },
         )
 
@@ -73,14 +74,14 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
         memory_context=memory_context,
     )
 
-    reply = result.text if result.text else "OpenClaw baglanti hatasi."
+    reply = result.text if result.text else "Baglanti hatasi."
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
     services.chat_store.append_message(
         session.id,
         role="assistant",
         text=reply,
-        source="openclaw",
+        source=result.source or ai_source,
         latency_ms=result.latency_ms,
         metrics={
             "cache_hit": result.cache_hit,
@@ -88,8 +89,8 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
             "context_messages": result.context_messages,
             "ok": result.ok,
             "memory_hits": memory_hits,
-            "used_model": result.used_model or services.settings.openclaw_model,
-            "model_locked": services.settings.openclaw_force_model,
+            "used_model": result.used_model or "",
+            "model_locked": result.model_locked,
         },
     )
 
@@ -97,14 +98,14 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
         reply=reply,
         session_id=session.id,
         metrics={
-            "source": "openclaw",
+            "source": result.source or ai_source,
             "ok": result.ok,
             "latency_ms": result.latency_ms,
             "cache_hit": result.cache_hit,
             "token_budget": result.token_budget,
             "context_messages": result.context_messages,
             "memory_hits": memory_hits,
-            "used_model": result.used_model or services.settings.openclaw_model,
-            "model_locked": services.settings.openclaw_force_model,
+            "used_model": result.used_model or "",
+            "model_locked": result.model_locked,
         },
     )

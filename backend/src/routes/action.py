@@ -28,11 +28,12 @@ def _compact_raw(raw: dict) -> dict:
 
 @router.post("/action", response_model=ActionResponse)
 def action(payload: ActionRequest, services: BackendServices = Depends(get_services)) -> ActionResponse:
+    ai_source = "openclaw" if services.settings.openclaw_enabled else "openai"
     text = (payload.text or "").strip()
     if not text:
         return ActionResponse(
             status="error",
-            source="openclaw",
+            source=ai_source,
             reply="Bos mesaj gonderilemez.",
             session_id=payload.session_id or "",
             metrics={"ok": False},
@@ -57,7 +58,7 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
         max_age_sec=services.settings.openclaw_cache_ttl_sec,
     )
     if dedup is not None:
-        reply = str(dedup.get("text") or "").strip() or "OpenClaw yanit uretemedi."
+        reply = str(dedup.get("text") or "").strip() or "Yanit uretemedi."
         prev_metrics = dedup.get("metrics") or {}
         prev_ok = bool(prev_metrics.get("ok", True))
         services.chat_store.append_message(session.id, role="user", text=text, source="user")
@@ -65,13 +66,13 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
             session.id,
             role="assistant",
             text=reply,
-            source="openclaw",
+            source=ai_source,
             latency_ms=0,
             metrics={"cache_hit": True, "duplicate": True, "ok": prev_ok},
         )
         return ActionResponse(
             status="ok" if prev_ok else "error",
-            source="openclaw",
+            source=ai_source,
             reply=reply,
             session_id=session.id,
             metrics={
@@ -81,8 +82,8 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
                 "token_budget": prev_metrics.get("token_budget"),
                 "context_messages": prev_metrics.get("context_messages"),
                 "memory_hits": prev_metrics.get("memory_hits", 0),
-                "used_model": prev_metrics.get("used_model", services.settings.openclaw_model),
-                "model_locked": services.settings.openclaw_force_model,
+                "used_model": prev_metrics.get("used_model", ""),
+                "model_locked": bool(prev_metrics.get("model_locked", False)),
             },
             raw={},
         )
@@ -105,14 +106,14 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
         memory_context=memory_context,
     )
 
-    reply = result.text if result.text else "OpenClaw baglanti hatasi."
+    reply = result.text if result.text else "Baglanti hatasi."
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
     services.chat_store.append_message(
         session.id,
         role="assistant",
         text=reply,
-        source="openclaw",
+        source=result.source or ai_source,
         latency_ms=result.latency_ms,
         metrics={
             "cache_hit": result.cache_hit,
@@ -120,14 +121,14 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
             "context_messages": result.context_messages,
             "ok": result.ok,
             "memory_hits": memory_hits,
-            "used_model": result.used_model or services.settings.openclaw_model,
-            "model_locked": services.settings.openclaw_force_model,
+            "used_model": result.used_model or "",
+            "model_locked": result.model_locked,
         },
     )
 
     return ActionResponse(
         status="ok" if result.ok else "error",
-        source="openclaw",
+        source=result.source or ai_source,
         reply=reply,
         session_id=session.id,
         metrics={
@@ -137,8 +138,8 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
             "token_budget": result.token_budget,
             "context_messages": result.context_messages,
             "memory_hits": memory_hits,
-            "used_model": result.used_model or services.settings.openclaw_model,
-            "model_locked": services.settings.openclaw_force_model,
+            "used_model": result.used_model or "",
+            "model_locked": result.model_locked,
         },
         raw=_compact_raw(result.raw),
     )

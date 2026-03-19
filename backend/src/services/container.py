@@ -43,7 +43,7 @@ def build_services() -> BackendServices:
     memory = MemoryManager()
     tools = ToolRouter(memory_manager=memory)
     voice = VoiceResponseService()
-    openclaw = OpenClawService(settings)
+    openclaw = OpenClawService(settings, agents=agents)
     chat_store = ChatStore(settings)
     profile = ProfileService(settings)
     cost_guard = CostGuardService(settings)
