@@ -5,6 +5,9 @@ from fastapi import FastAPI
 from backend.src.routes.action import router as action_router
 from backend.src.routes.chat import router as chat_router
 from backend.src.routes.health import router as health_router
+from backend.src.routes.history import router as history_router
+from backend.src.routes.profile import router as profile_router
+from backend.src.routes.usage import router as usage_router
 from backend.src.routes.web import router as web_router
 from backend.src.services.container import build_services
 from backend.src.utils.logging import get_logger
@@ -18,6 +21,9 @@ app.include_router(health_router)
 app.include_router(web_router)
 app.include_router(chat_router)
 app.include_router(action_router)
+app.include_router(history_router)
+app.include_router(profile_router)
+app.include_router(usage_router)
 
 if not app.state.services.settings.web_mvp_only:
     from backend.src.routes.audio import router as audio_router

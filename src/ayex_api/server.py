@@ -12,6 +12,13 @@ from backend.src.schemas import (
     ChatResponse,
     EventRequest,
     EventResponse,
+    MessageInfo,
+    ProfileResponse,
+    ProfileUpdateRequest,
+    SessionCreateRequest,
+    SessionInfo,
+    SessionListResponse,
+    SessionMessagesResponse,
     TTSRequest,
 )
 
@@ -24,4 +31,11 @@ __all__ = [
     "TTSRequest",
     "EventRequest",
     "EventResponse",
+    "SessionCreateRequest",
+    "SessionInfo",
+    "SessionListResponse",
+    "MessageInfo",
+    "SessionMessagesResponse",
+    "ProfileResponse",
+    "ProfileUpdateRequest",
 ]

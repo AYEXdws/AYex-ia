@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from backend.src.config.env import BackendSettings, load_settings
 from backend.src.memory.manager import MemoryManager
 from backend.src.services.agent_registry import AgentRegistry
+from backend.src.services.chat_store import ChatStore
+from backend.src.services.cost_guard import CostGuardService
 from backend.src.services.intent_router import IntentRouter
 from backend.src.services.openclaw_service import OpenClawService
+from backend.src.services.profile_service import ProfileService
 from backend.src.services.response_orchestrator import ResponseOrchestrator
 from backend.src.services.stt_service import SpeechToTextService
 from backend.src.services.tool_router import ToolRouter
@@ -26,6 +29,9 @@ class BackendServices:
     voice: VoiceResponseService
     orchestrator: ResponseOrchestrator
     openclaw: OpenClawService
+    chat_store: ChatStore
+    profile: ProfileService
+    cost_guard: CostGuardService
 
 
 def build_services() -> BackendServices:
@@ -38,6 +44,9 @@ def build_services() -> BackendServices:
     tools = ToolRouter(memory_manager=memory)
     voice = VoiceResponseService()
     openclaw = OpenClawService(settings)
+    chat_store = ChatStore(settings)
+    profile = ProfileService(settings)
+    cost_guard = CostGuardService(settings)
     orchestrator = ResponseOrchestrator(
         stt_service=stt,
         tts_service=tts,
@@ -57,4 +66,7 @@ def build_services() -> BackendServices:
         voice=voice,
         orchestrator=orchestrator,
         openclaw=openclaw,
+        chat_store=chat_store,
+        profile=profile,
+        cost_guard=cost_guard,
     )

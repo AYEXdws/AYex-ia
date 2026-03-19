@@ -21,5 +21,13 @@ services:
         value: openai/gpt-4o-mini
       - key: OPENCLAW_MAX_OUTPUT_TOKENS
         value: "80"
+      - key: OPENCLAW_TIMEOUT_SEC
+        value: "12"
+      - key: OPENCLAW_CONTEXT_TURNS
+        value: "6"
+      - key: OPENCLAW_CACHE_TTL_SEC
+        value: "45"
+      - key: OPENCLAW_CACHE_SIZE
+        value: "128"
       - key: OPENCLAW_INSTRUCTIONS
-        value: "Her zaman Turkce cevap ver. Kisa, net ve dogal yaz. En fazla 3 cumle kullan."
+        value: "Her zaman Turkce cevap ver. Kisa, net ve dogal yaz. Basit sorularda 2-4 cumle kullan; analiz gereken durumda maddeli ve yapisal yanit ver."

@@ -8,6 +8,7 @@ This refactor preserves the working prototype behavior while reorganizing the co
 
 - OpenClaw is the primary/only text reasoning engine.
 - Web MVP default: `AYEX_WEB_MVP_ONLY=true` (only web/chat/action/health routes are active).
+- Jarvis-style web console includes persistent chat sessions and profile-aware responses.
 - Voice/ESP32 routes stay available for later phases by setting `AYEX_WEB_MVP_ONLY=false`.
 
 ## Backend API surface
@@ -15,6 +16,12 @@ This refactor preserves the working prototype behavior while reorganizing the co
 - `GET /health`
 - `POST /chat`
 - `POST /action`
+- `GET /profile`
+- `PATCH /profile`
+- `GET /sessions`
+- `POST /sessions`
+- `GET /sessions/{session_id}/messages`
+- `DELETE /sessions/{session_id}`
 - `POST /audio` (only when `AYEX_WEB_MVP_ONLY=false`)
 - `POST /voice/turn` (only when `AYEX_WEB_MVP_ONLY=false`)
 - `POST /tts` (only when `AYEX_WEB_MVP_ONLY=false`)
@@ -51,6 +58,7 @@ project-root/
 pip install -r requirements.txt
 cp .env.example .env
 # .env icine OPENAI_API_KEY ve OPENCLAW_API_KEY degerlerini gir
+./setup_openclaw_features.sh
 ./run_mvp.sh
 ```
 
@@ -65,9 +73,19 @@ Environment:
 - optional: `AYEX_API_BASE_URL`, `AYEX_STT_MODEL`, `AYEX_TTS_MODEL`, `AYEX_DEFAULT_VOICE`
 - OpenClaw bridge: `OPENCLAW_ENABLED=true`, `OPENCLAW_BASE_URL=http://127.0.0.1:18789`, `OPENCLAW_API_KEY=...`
 - OpenClaw mode: `OPENCLAW_MODE=openai_chat_completions`
-- OpenClaw model/latency: `OPENCLAW_MODEL=openai/gpt-4o-mini`, `OPENCLAW_MAX_OUTPUT_TOKENS=80`
-- OpenClaw response language: `OPENCLAW_INSTRUCTIONS=Her zaman Turkce cevap ver. Kisa, net ve dogal yaz. En fazla 3 cumle kullan.`
+- OpenClaw model lock: `OPENCLAW_MODEL=openai/gpt-4o-mini`, `OPENCLAW_FORCE_MODEL=true`
+- OpenClaw output budget: `OPENCLAW_MAX_OUTPUT_TOKENS=80`
+- OpenClaw feature bootstrap vars:
+  - `OPENCLAW_PUBLIC_URL=ws://127.0.0.1:18789`
+  - `OPENCLAW_HOOKS_TOKEN=...` (opsiyonel; verilmezse otomatik uretilir)
+  - `OPENCLAW_CRON_WEBHOOK_TOKEN=...` (opsiyonel; verilmezse otomatik uretilir)
+  - `OPENCLAW_OTEL_ENABLED=false`
+  - `OPENCLAW_OTEL_ENDPOINT=http://127.0.0.1:4318` (opsiyonel)
+- OpenClaw low-latency controls: `OPENCLAW_TIMEOUT_SEC=12`, `OPENCLAW_CONTEXT_TURNS=6`, `OPENCLAW_CACHE_TTL_SEC=45`, `OPENCLAW_CACHE_SIZE=128`
+- Cost guard controls: `AYEX_DAILY_REQUEST_LIMIT=350`, `AYEX_DAILY_INPUT_CHAR_LIMIT=120000`
+- OpenClaw response language: `OPENCLAW_INSTRUCTIONS=Her zaman Turkce cevap ver. Kisa, net ve dogal yaz. Basit sorularda 2-4 cumle kullan; analiz gereken durumda maddeli ve yapisal yanit ver.`
 - web-only MVP toggle: `AYEX_WEB_MVP_ONLY=true`
+- local data paths: `AYEX_DATA_DIR=.ayex`, `AYEX_PROFILE_PATH=.ayex/profile.json`, `AYEX_CHAT_DIR=.ayex/chats`
 - audio default engine (ESP32 dahil): `AYEX_AUDIO_ENGINE_DEFAULT=openclaw`
 
 Quick local OpenClaw bridge setup:
@@ -77,16 +95,51 @@ export OPENCLAW_ENABLED=true
 export OPENCLAW_BASE_URL=http://127.0.0.1:18789
 export OPENCLAW_MODE=openai_chat_completions
 export OPENCLAW_MODEL=openai/gpt-4o-mini
+export OPENCLAW_FORCE_MODEL=true
 export OPENCLAW_MAX_OUTPUT_TOKENS=80
-export OPENCLAW_INSTRUCTIONS="Her zaman Turkce cevap ver. Kisa, net ve dogal yaz. En fazla 3 cumle kullan."
+export OPENCLAW_TIMEOUT_SEC=12
+export OPENCLAW_CONTEXT_TURNS=6
+export OPENCLAW_CACHE_TTL_SEC=45
+export OPENCLAW_CACHE_SIZE=128
+export OPENCLAW_INSTRUCTIONS="Her zaman Turkce cevap ver. Kisa, net ve dogal yaz. Basit sorularda 2-4 cumle kullan; analiz gereken durumda maddeli ve yapisal yanit ver."
+export AYEX_DATA_DIR=.ayex
+export AYEX_PROFILE_PATH=.ayex/profile.json
+export AYEX_CHAT_DIR=.ayex/chats
+export AYEX_DAILY_REQUEST_LIMIT=350
+export AYEX_DAILY_INPUT_CHAR_LIMIT=120000
 export AYEX_AUDIO_ENGINE_DEFAULT=openclaw
 # export OPENCLAW_API_KEY=...
 ```
 
 Web UI:
 
-- `GET /` OpenClaw web panelidir.
+- `GET /` Jarvis tarzı OpenClaw web panelidir.
 - Sohbet istekleri `POST /action` endpointine gider.
+- Oturum geçmişi ve profil bilgisi `sessions/profile` endpointlerinden okunur.
+- Günlük kullanım metrikleri: `GET /usage`
+
+## OpenClaw feature integration
+
+`setup_openclaw_features.sh` su bileşenleri guvenli varsayilanlarla aktive eder:
+
+- `memory-lancedb` (slot/memory aktif)
+- `voice-call` (mock provider; local gelistirme icin)
+- `talk-voice`
+- `device-pair`
+- `diagnostics-otel` + diagnostics config
+- `cron` scheduler
+- `hooks` (webhook ingest)
+
+Komut:
+
+```bash
+./setup_openclaw_features.sh
+```
+
+Tokenlar:
+
+- Script, webhook/cron tokenlarini `~/.openclaw/ayex-integration.tokens` dosyasina yazar.
+- OpenClaw config dosyasinin timestampli yedegi de otomatik olusturulur.
 
 ## ESP32 PlatformIO run
 
