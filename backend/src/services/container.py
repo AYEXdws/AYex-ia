@@ -78,7 +78,7 @@ def build_services() -> BackendServices:
     long_memory.sync_profile(profile.load())
     agent_mode = AgentModeService(openclaw=openclaw, tools=tools)
     intel_store = IntelStore()
-    intel = IntelService(intel_store)
+    intel = IntelService(intel_store, openai_client=openclaw.openai)
     _seed_intel(intel)
     cost_guard = CostGuardService(settings)
     orchestrator = ResponseOrchestrator(

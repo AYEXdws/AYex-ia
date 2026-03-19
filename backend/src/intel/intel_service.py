@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import json
+
 from backend.src.intel.event_model import IntelEvent
 from backend.src.intel.intel_store import IntelStore
+from backend.src.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class IntelService:
-    def __init__(self, store: IntelStore):
+    def __init__(self, store: IntelStore, openai_client=None):
         self.store = store
+        self.openai_client = openai_client
 
     def create_event(
         self,
@@ -28,19 +34,96 @@ class IntelService:
         )
         return self.store.add_event(event)
 
+    def analyze_event(self, event: IntelEvent) -> dict:
+        if self.openai_client is None:
+            return self._fallback_analysis(event, reason="openai_client_missing")
+        prompt = (
+            "Analyze this event:\n"
+            "- Why is it important?\n"
+            "- What could be the impact?\n"
+            "- Should it be monitored?\n\n"
+            "Return short structured insight.\n\n"
+            f"Title: {event.title}\n"
+            f"Summary: {event.summary}\n"
+            f"Category: {event.category}\n"
+            f"Importance: {event.importance}\n"
+            f"Source: {event.source}\n"
+            f"Tags: {', '.join(event.tags)}\n\n"
+            "Respond as JSON with keys: importance_reason, impact, action."
+        )
+        try:
+            res = self.openai_client.call_responses(
+                prompt=prompt,
+                model="gpt-4o-mini",
+                instructions=(
+                    "Keep output concise. action must be either 'monitor' or 'ignore'. "
+                    "Return only valid JSON."
+                ),
+                max_output_tokens=160,
+                route_name="intel_analysis",
+            )
+            parsed = self._parse_analysis_json(res.text)
+            if parsed is None:
+                return self._fallback_analysis(event, reason="invalid_json_from_model")
+            return parsed
+        except Exception as exc:
+            logger.error("INTEL_ANALYZE_ERROR event_id=%s error=%s", event.id, exc)
+            return self._fallback_analysis(event, reason="openai_error")
+
     def get_daily_brief(self) -> dict:
-        top = self.store.get_top_events(limit=5)
+        top = self.store.get_top_events(limit=3)
         items = [
             {
-                "id": e.id,
-                "title": e.title,
-                "summary": e.summary,
-                "category": e.category,
-                "importance": e.importance,
-                "timestamp": e.timestamp.isoformat(),
-                "source": e.source,
-                "tags": e.tags,
+                "event": {
+                    "id": e.id,
+                    "title": e.title,
+                    "summary": e.summary,
+                    "category": e.category,
+                    "importance": e.importance,
+                    "timestamp": e.timestamp.isoformat(),
+                    "source": e.source,
+                    "tags": e.tags,
+                },
+                "analysis": self.analyze_event(e),
             }
             for e in top
         ]
         return {"top_events": items, "count": len(self.store.get_all_events())}
+
+    def _parse_analysis_json(self, text: str) -> dict | None:
+        raw = (text or "").strip()
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start < 0 or end <= start:
+                return None
+            try:
+                data = json.loads(raw[start : end + 1])
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(data, dict):
+            return None
+        importance_reason = str(data.get("importance_reason") or "").strip()
+        impact = str(data.get("impact") or "").strip()
+        action = str(data.get("action") or "").strip().lower()
+        if action not in {"monitor", "ignore"}:
+            action = "monitor"
+        if not importance_reason or not impact:
+            return None
+        return {
+            "importance_reason": importance_reason[:280],
+            "impact": impact[:280],
+            "action": action,
+        }
+
+    def _fallback_analysis(self, event: IntelEvent, reason: str) -> dict:
+        action = "monitor" if int(event.importance) >= 7 else "ignore"
+        return {
+            "importance_reason": f"Auto-analysis fallback ({reason}): event importance={event.importance}.",
+            "impact": "Potential impact exists; manual review recommended.",
+            "action": action,
+        }
