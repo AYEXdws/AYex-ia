@@ -13,6 +13,7 @@ from backend.src.routes.chat import router as chat_router
 from backend.src.routes.events import router as events_router
 from backend.src.routes.health import router as health_router
 from backend.src.routes.history import router as history_router
+from backend.src.routes.intel import router as intel_router
 from backend.src.routes.profile import router as profile_router
 from backend.src.routes.usage import router as usage_router
 from backend.src.services.container import build_services
@@ -22,7 +23,7 @@ logger = get_logger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 FRONTEND_INDEX = FRONTEND_DIST / "index.html"
-API_PREFIXES = ("/auth", "/chat", "/action", "/events", "/health", "/sessions", "/profile", "/usage", "/audio", "/voice", "/tts", "/event")
+API_PREFIXES = ("/auth", "/chat", "/action", "/events", "/health", "/sessions", "/profile", "/usage", "/audio", "/voice", "/tts", "/event", "/intel")
 
 app = FastAPI(title="AYEX Backend", version="0.2.0")
 app.add_middleware(AuthMiddleware)
@@ -33,6 +34,7 @@ app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(action_router)
 app.include_router(history_router)
+app.include_router(intel_router)
 app.include_router(profile_router)
 app.include_router(usage_router)
 app.include_router(events_router)

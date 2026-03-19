@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import os
 
 from backend.src.config.env import BackendSettings, load_settings
+from backend.src.intel.intel_service import IntelService
+from backend.src.intel.intel_store import IntelStore
 from backend.src.memory.manager import MemoryManager
 from backend.src.services.agent_mode import AgentModeService
 from backend.src.services.agent_registry import AgentRegistry
@@ -42,6 +44,7 @@ class BackendServices:
     style: ResponseStyleService
     long_memory: LongMemoryService
     agent_mode: AgentModeService
+    intel: IntelService
     cost_guard: CostGuardService
 
 
@@ -74,6 +77,9 @@ def build_services() -> BackendServices:
     long_memory = LongMemoryService(settings)
     long_memory.sync_profile(profile.load())
     agent_mode = AgentModeService(openclaw=openclaw, tools=tools)
+    intel_store = IntelStore()
+    intel = IntelService(intel_store)
+    _seed_intel(intel)
     cost_guard = CostGuardService(settings)
     orchestrator = ResponseOrchestrator(
         stt_service=stt,
@@ -99,5 +105,51 @@ def build_services() -> BackendServices:
         style=style,
         long_memory=long_memory,
         agent_mode=agent_mode,
+        intel=intel,
         cost_guard=cost_guard,
+    )
+
+
+def _seed_intel(intel: IntelService) -> None:
+    if intel.store.get_all_events():
+        return
+    intel.create_event(
+        title="Bitcoin rises 5%",
+        summary="BTC fiyatı son 24 saatte yaklasik %5 artarak risk istahini yukseltti.",
+        category="market",
+        importance=9,
+        source="seed",
+        tags=["btc", "crypto", "market"],
+    )
+    intel.create_event(
+        title="Major data breach reported",
+        summary="Buyuk bir teknoloji sirketinde milyonlarca kaydi etkileyen veri sizintisi bildirildi.",
+        category="cybersecurity",
+        importance=10,
+        source="seed",
+        tags=["security", "breach"],
+    )
+    intel.create_event(
+        title="AI regulation discussion",
+        summary="Politika yapicilar yeni yapay zeka duzenleme cercevelerini tartisiyor.",
+        category="policy",
+        importance=7,
+        source="seed",
+        tags=["ai", "regulation"],
+    )
+    intel.create_event(
+        title="Cloud outage impacts services",
+        summary="Bolgesel bulut kesintisi bazi SaaS urunlerinde erisim sorunlarina neden oldu.",
+        category="infrastructure",
+        importance=8,
+        source="seed",
+        tags=["cloud", "outage"],
+    )
+    intel.create_event(
+        title="Semiconductor supply improves",
+        summary="Cip tedarik zincirindeki normalizasyon, donanim teslim surelerini kisaltiyor.",
+        category="industry",
+        importance=6,
+        source="seed",
+        tags=["chip", "supply-chain"],
     )
