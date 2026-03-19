@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ActionRequest, ActionResponse
@@ -29,7 +29,8 @@ def _compact_raw(raw: dict) -> dict:
 
 
 @router.post("/action", response_model=ActionResponse)
-def action(payload: ActionRequest, services: BackendServices = Depends(get_services)) -> ActionResponse:
+def action(payload: ActionRequest, request: Request, services: BackendServices = Depends(get_services)) -> ActionResponse:
+    user_id = str(getattr(request.state, "user_id", "default"))
     ai_source = "openclaw" if services.settings.openclaw_enabled else "openai_direct"
     text = (payload.text or "").strip()
     if not text:
@@ -100,7 +101,7 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
         exclude_session_id=session.id,
         limit=4,
     )
-    long_memory_ctx = services.long_memory.build_context(query=text, limit=4)
+    long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
     long_memory_text = long_memory_ctx.as_text()
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
     if long_memory_text:
@@ -115,6 +116,7 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
             event_type=f"tool:{tool_result.selected_tool or intent.category}",
             payload={"query": text, "evidence": tool_context[:3000]},
             source="tool_router",
+            user_id=user_id,
         )
 
     merged_memory = "\n\n".join([x for x in [memory_context, long_memory_text] if x.strip()])
@@ -166,13 +168,14 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
             "tool": tool_result.selected_tool,
         },
     )
-    services.long_memory.sync_profile(profile_data)
+    services.long_memory.sync_profile(profile_data, user_id=user_id)
     services.long_memory.append_conversation(
         session_id=session.id,
         user_text=text,
         assistant_text=reply,
         intent=intent.category,
         style=style_decision.style,
+        user_id=user_id,
     )
 
     return ActionResponse(

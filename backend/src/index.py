@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from backend.src.middleware.auth_middleware import AuthMiddleware
 from backend.src.routes.action import router as action_router
+from backend.src.routes.auth import router as auth_router
 from backend.src.routes.chat import router as chat_router
 from backend.src.routes.events import router as events_router
 from backend.src.routes.health import router as health_router
@@ -16,9 +18,11 @@ from backend.src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 app = FastAPI(title="AYEX Backend", version="0.2.0")
+app.add_middleware(AuthMiddleware)
 app.state.services = build_services()
 
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(web_router)
 app.include_router(chat_router)
 app.include_router(action_router)

@@ -29,22 +29,27 @@ class MemoryContext:
 
 class LongMemoryService:
     def __init__(self, settings: BackendSettings):
-        root = Path(settings.data_dir)
-        root.mkdir(parents=True, exist_ok=True)
-        self.profile_path = root / "memory_profile.json"
-        self.conv_path = root / "memory_conversations.jsonl"
-        self.events_path = root / "memory_events.jsonl"
-        if not self.profile_path.exists():
-            self.profile_path.write_text("{}", encoding="utf-8")
-        if not self.conv_path.exists():
-            self.conv_path.touch()
-        if not self.events_path.exists():
-            self.events_path.touch()
+        self.root = Path(settings.data_dir)
+        self.root.mkdir(parents=True, exist_ok=True)
 
-    def sync_profile(self, profile: dict[str, Any]) -> None:
-        merged = self._read_json(self.profile_path)
+    def _paths(self, user_id: str) -> tuple[Path, Path, Path]:
+        safe_user = re.sub(r"[^a-zA-Z0-9_-]+", "_", (user_id or "default")).strip("_") or "default"
+        profile_path = self.root / f"memory_{safe_user}.json"
+        conv_path = self.root / f"memory_conversations_{safe_user}.jsonl"
+        events_path = self.root / f"memory_events_{safe_user}.jsonl"
+        if not profile_path.exists():
+            profile_path.write_text("{}", encoding="utf-8")
+        if not conv_path.exists():
+            conv_path.touch()
+        if not events_path.exists():
+            events_path.touch()
+        return profile_path, conv_path, events_path
+
+    def sync_profile(self, profile: dict[str, Any], user_id: str = "default") -> None:
+        profile_path, _, _ = self._paths(user_id)
+        merged = self._read_json(profile_path)
         merged.update(profile or {})
-        self.profile_path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        profile_path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def append_conversation(
         self,
@@ -54,31 +59,37 @@ class LongMemoryService:
         assistant_text: str,
         intent: str,
         style: str,
+        user_id: str = "default",
     ) -> None:
+        _, conv_path, _ = self._paths(user_id)
         row = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "session_id": session_id,
+            "user_id": user_id,
             "intent": intent,
             "style": style,
             "user": user_text[:1200],
             "assistant": assistant_text[:1600],
         }
-        self._append_jsonl(self.conv_path, row)
+        self._append_jsonl(conv_path, row)
 
-    def append_event(self, *, event_type: str, payload: dict[str, Any], source: str) -> None:
+    def append_event(self, *, event_type: str, payload: dict[str, Any], source: str, user_id: str = "default") -> None:
+        _, _, events_path = self._paths(user_id)
         row = {
             "ts": datetime.now().isoformat(timespec="seconds"),
+            "user_id": user_id,
             "type": event_type,
             "source": source,
             "payload": payload,
         }
-        self._append_jsonl(self.events_path, row)
+        self._append_jsonl(events_path, row)
 
-    def build_context(self, *, query: str, limit: int = 4) -> MemoryContext:
-        profile = self._read_json(self.profile_path)
+    def build_context(self, *, query: str, limit: int = 4, user_id: str = "default") -> MemoryContext:
+        profile_path, conv_path, events_path = self._paths(user_id)
+        profile = self._read_json(profile_path)
         q_tokens = self._tokenize(query)
-        conv_hits = self._recall_jsonl(self.conv_path, q_tokens, limit=limit)
-        event_hits = self._recall_jsonl(self.events_path, q_tokens, limit=limit)
+        conv_hits = self._recall_jsonl(conv_path, q_tokens, limit=limit)
+        event_hits = self._recall_jsonl(events_path, q_tokens, limit=limit)
         return MemoryContext(profile=profile, conversation_hits=conv_hits, event_hits=event_hits)
 
     def _read_json(self, path: Path) -> dict[str, Any]:
