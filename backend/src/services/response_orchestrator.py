@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from ayex_core.agent import AyexAgent
 
 from backend.src.services.intent_router import IntentResult, IntentRouter
+from backend.src.services.model_router import select_model
 from backend.src.services.openclaw_service import OpenClawService
 from backend.src.services.stt_service import SpeechToTextService
 from backend.src.services.tool_router import ToolRouter
@@ -59,12 +60,35 @@ class ResponseOrchestrator:
                 intent=intent,
             )
 
+        selected = select_model(transcript, intent.category)
+        selected_model = str(selected.get("model") or "gpt-4o")
+        selected_mode = str(selected.get("mode") or "chat")
+        selected_reason = str(selected.get("reason") or "unknown")
+        logger.info(
+            "MODEL_SELECTED model=%s mode=%s reason=%s",
+            selected_model,
+            selected_mode,
+            selected_reason,
+        )
+
         result = self.openclaw_service.run_action(
             transcript,
             workspace=workspace,
-            model=model,
+            model=model or selected_model,
             route_name="audio_turn",
         )
+        if not result.ok and (model or selected_model) != "gpt-4o-mini":
+            logger.warning(
+                "MODEL_FALLBACK_TRIGGER from_model=%s to_model=gpt-4o-mini reason=primary_failed",
+                model or selected_model,
+            )
+            result = self.openclaw_service.run_action(
+                transcript,
+                workspace=workspace,
+                model="gpt-4o-mini",
+                route_name="audio_turn_fallback",
+            )
+
         reply = result.text if result.ok else "Model yaniti alinamadi. Lutfen tekrar dene."
         logger.info(
             "AUDIO_ROUTE_REPLY source=%s ok=%s latency_ms=%s",
