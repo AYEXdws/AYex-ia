@@ -59,7 +59,7 @@ project-root/
 ```bash
 pip install -r requirements.txt
 cp .env.example .env
-# .env icine OPENAI_API_KEY ve OPENCLAW_API_KEY degerlerini gir
+# .env icine OPENAI_API_KEY yaz (AYEX_API_KEY sadece legacy fallback)
 ./setup_openclaw_features.sh
 ./run_mvp.sh
 ```
@@ -75,6 +75,7 @@ Environment:
 - optional: `AYEX_API_BASE_URL`, `AYEX_STT_MODEL`, `AYEX_TTS_MODEL`, `AYEX_DEFAULT_VOICE`
 - OpenClaw bridge: `OPENCLAW_ENABLED=true`, `OPENCLAW_BASE_URL=http://127.0.0.1:18789`, `OPENCLAW_API_KEY=...`
 - Direct OpenAI mode: `OPENCLAW_ENABLED=false` (OpenClaw gateway kontrolu/istegi yapilmaz)
+- Direct OpenAI model adlari prefix'siz gider (`gpt-4o-mini`). `openai/gpt-4o-mini` verilse bile otomatik normalize edilir.
 - OpenClaw mode: `OPENCLAW_MODE=openai_chat_completions`
 - OpenClaw model lock: `OPENCLAW_MODEL=openai/gpt-4o-mini`, `OPENCLAW_FORCE_MODEL=true`
 - OpenClaw output budget: `OPENCLAW_MAX_OUTPUT_TOKENS=80`
@@ -150,12 +151,14 @@ OpenClaw timeout/bridge bagimliligini gecici kapatmak icin:
 
 ```bash
 export OPENCLAW_ENABLED=false
+export OPENCLAW_MODEL=gpt-4o-mini
 ./run_mvp.sh
 ```
 
 Bu modda:
 - `/chat` ve `/action` dogrudan OpenAI istemcisi ile calisir.
 - `localhost:18789` kontrolu/istegi yapilmaz.
+- Direct OpenAI cagrisi `OPENAI_CALL_START/SUCCESS/ERROR` loglari ile izlenir.
 
 ## ESP32 PlatformIO run
 

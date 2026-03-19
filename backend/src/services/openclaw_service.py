@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from urllib import request as urlrequest
 
-from backend.src.config.env import BackendSettings
+from backend.src.config.env import BackendSettings, normalize_model_for_openai
 from backend.src.services.agent_registry import AgentRegistry
 from backend.src.services.http_utils import parse_json_bytes, with_retries
 from backend.src.services.openai_client import OpenAIDirectClient
@@ -189,6 +189,7 @@ class OpenClawService:
     ) -> OpenClawResult:
         prompt = (text or "").strip()
         model_name = self._resolve_model(model)
+        normalized_model = normalize_model_for_openai(model_name)
         started = time.perf_counter()
         try:
             # Deliberately bypass agent-level canned fallback text when OpenClaw is disabled.
@@ -209,7 +210,7 @@ class OpenClawService:
             return OpenClawResult(
                 ok=True,
                 text=response.text,
-                raw={**response.raw, "_mode": "openai_direct"},
+                raw={**response.raw, "_mode": "openai_direct", "_original_model": model_name, "_normalized_model": normalized_model},
                 source="openai_direct",
                 latency_ms=response.latency_ms,
                 cache_hit=False,
@@ -224,13 +225,18 @@ class OpenClawService:
             return OpenClawResult(
                 ok=False,
                 text="Model yaniti alinamadi. Lutfen tekrar dene.",
-                raw={"error": str(exc), "mode": "openai_direct"},
+                raw={
+                    "error": str(exc),
+                    "mode": "openai_direct",
+                    "original_model": model_name,
+                    "normalized_model": normalized_model,
+                },
                 source="openai_direct",
                 latency_ms=latency_ms,
                 cache_hit=False,
                 token_budget=self._compute_token_budget(prompt),
                 context_messages=len(self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns)),
-                used_model=model_name,
+                used_model=normalized_model,
                 model_locked=False,
             )
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass
 from typing import Any
-from urllib import request as urlrequest
 
-from backend.src.config.env import BackendSettings, openai_api_key
+from openai import OpenAI
+
+from backend.src.config.env import BackendSettings, normalize_model_for_openai, openai_api_key
 from backend.src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -30,6 +30,16 @@ class OpenAIDirectClient:
     def __init__(self, settings: BackendSettings):
         self.settings = settings
         self.base_url = settings.api_base_url.rstrip("/")
+        self._client: OpenAI | None = None
+
+    def _client_instance(self) -> OpenAI:
+        if self._client is None:
+            self._client = OpenAI(
+                api_key=openai_api_key(),
+                base_url=self.base_url,
+                timeout=self.settings.openai_timeout_sec,
+            )
+        return self._client
 
     def call_responses(
         self,
@@ -41,40 +51,33 @@ class OpenAIDirectClient:
         route_name: str,
     ) -> OpenAIChatResult:
         started = time.perf_counter()
+        original_model = (model or "").strip()
+        normalized_model = normalize_model_for_openai(original_model)
 
         logger.info(
-            "OPENAI_CALL_START route=%s model=%s openclaw_enabled=%s",
+            "OPENAI_CALL_START route=%s original_model=%s normalized_model=%s openclaw_enabled=%s",
             route_name,
-            model,
+            original_model,
+            normalized_model,
             self.settings.openclaw_enabled,
         )
 
-        payload: dict[str, Any] = {
-            "model": model,
-            "input": prompt,
-            "instructions": instructions,
-            "max_output_tokens": max_output_tokens,
-            "store": False,
-            "temperature": 0.2,
-        }
         try:
-            api_key = openai_api_key()
-            req = urlrequest.Request(
-                f"{self.base_url}/responses",
-                data=json.dumps(payload).encode("utf-8"),
-                method="POST",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
+            client = self._client_instance()
+            response = client.responses.create(
+                model=normalized_model,
+                input=prompt,
+                instructions=instructions,
+                max_output_tokens=max_output_tokens,
+                temperature=0.2,
+                store=False,
             )
-            with urlrequest.urlopen(req, timeout=self.settings.openai_timeout_sec) as resp:
-                raw = json.loads(resp.read().decode("utf-8"))
+            raw = response.model_dump() if hasattr(response, "model_dump") else {}
             text = self._extract_text(raw).strip()
             if not text:
                 raise RuntimeError("Empty model text")
             latency_ms = int((time.perf_counter() - started) * 1000)
-            used_model = self._extract_model(raw, model)
+            used_model = self._extract_model(raw, normalized_model)
             logger.info(
                 "OPENAI_CALL_SUCCESS route=%s model=%s latency_ms=%s",
                 route_name,
@@ -89,9 +92,10 @@ class OpenAIDirectClient:
             )
         except Exception as exc:
             logger.error(
-                "OPENAI_CALL_ERROR route=%s model=%s error=%s",
+                "OPENAI_CALL_ERROR route=%s original_model=%s normalized_model=%s error=%s",
                 route_name,
-                model,
+                original_model,
+                normalized_model,
                 exc,
             )
             raise

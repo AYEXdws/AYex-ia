@@ -83,3 +83,14 @@ def openai_api_key() -> str:
     if not key:
         raise RuntimeError("OPENAI_API_KEY tanimli degil (AYEX_API_KEY legacy fallback da bos).")
     return key
+
+
+def normalize_model_for_openai(model: str) -> str:
+    raw = (model or "").strip()
+    if not raw:
+        return "gpt-4o-mini"
+    if "/" in raw:
+        provider, name = raw.split("/", 1)
+        if provider.strip().lower() in {"openai", "oai"} and name.strip():
+            return name.strip()
+    return raw
