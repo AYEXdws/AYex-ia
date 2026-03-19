@@ -15,5 +15,5 @@ class IntelStore:
         return list(self._events)
 
     def get_top_events(self, limit: int = 5) -> list[IntelEvent]:
-        ordered = sorted(self._events, key=lambda x: int(x.importance), reverse=True)
+        ordered = sorted(self._events, key=lambda x: float(x.final_score), reverse=True)
         return ordered[: max(1, min(100, limit))]

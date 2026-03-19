@@ -15,3 +15,7 @@ class IntelEvent:
     timestamp: datetime = field(default_factory=datetime.utcnow)
     source: str = "internal"
     tags: list[str] = field(default_factory=list)
+    importance_score: float = 0.0
+    urgency_score: float = 0.0
+    confidence_score: float = 0.0
+    final_score: float = 0.0

@@ -32,7 +32,28 @@ class IntelService:
             source=source.strip() or "internal",
             tags=tags or [],
         )
+        score = self.calculate_score(event)
+        event.importance_score = score["importance_score"]
+        event.urgency_score = score["urgency_score"]
+        event.confidence_score = score["confidence_score"]
+        event.final_score = score["final_score"]
         return self.store.add_event(event)
+
+    def calculate_score(self, event: IntelEvent) -> dict:
+        importance_score = max(0.1, min(1.0, float(event.importance) / 10.0))
+        title_low = (event.title or "").lower()
+        if any(k in title_low for k in ("breach", "crash", "urgent")):
+            urgency_score = 0.95
+        else:
+            urgency_score = 0.6
+        confidence_score = 0.7
+        final_score = (importance_score * 0.5) + (urgency_score * 0.3) + (confidence_score * 0.2)
+        return {
+            "importance_score": round(importance_score, 4),
+            "urgency_score": round(urgency_score, 4),
+            "confidence_score": round(confidence_score, 4),
+            "final_score": round(final_score, 4),
+        }
 
     def analyze_event(self, event: IntelEvent) -> dict:
         if self.openai_client is None:
@@ -83,6 +104,11 @@ class IntelService:
                     "timestamp": e.timestamp.isoformat(),
                     "source": e.source,
                     "tags": e.tags,
+                },
+                "score": {
+                    "final": e.final_score,
+                    "importance": e.importance_score,
+                    "urgency": e.urgency_score,
                 },
                 "analysis": self.analyze_event(e),
             }
