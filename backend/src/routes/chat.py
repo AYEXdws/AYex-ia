@@ -5,8 +5,10 @@ from fastapi import APIRouter, Depends
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
+from backend.src.utils.logging import get_logger
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -58,22 +60,57 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
         )
 
     history = services.chat_store.model_context(session.id, turns=services.settings.openclaw_context_turns)
+    profile_data = services.profile.load()
+    style_decision = services.style.detect(text, profile_style=str(profile_data.get("response_style") or ""))
+    intent = services.intents.route(text)
     memory_context = services.chat_store.recall_context_text(
         query=text,
         exclude_session_id=session.id,
         limit=4,
     )
+    long_memory_ctx = services.long_memory.build_context(query=text, limit=4)
+    long_memory_text = long_memory_ctx.as_text()
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
+    if long_memory_text:
+        memory_hits += len(long_memory_ctx.conversation_hits) + len(long_memory_ctx.event_hits)
+    if memory_hits > 0:
+        logger.info("MEMORY_USED route=chat hits=%s", memory_hits)
 
-    result = services.openclaw.run_action(
-        text,
-        workspace=payload.workspace,
-        model=payload.model,
-        history=history,
-        profile_context=services.profile.prompt_context(),
-        memory_context=memory_context,
-        route_name="chat",
-    )
+    tool_result = services.tools.route_and_run(intent=intent.category, text=text)
+    tool_context = tool_result.evidence_text()
+    if tool_result.has_data:
+        services.long_memory.append_event(
+            event_type=f"tool:{tool_result.selected_tool or intent.category}",
+            payload={"query": text, "evidence": tool_context[:3000]},
+            source="tool_router",
+        )
+
+    merged_memory = "\n\n".join([x for x in [memory_context, long_memory_text] if x.strip()])
+    model_input = text
+    if tool_context:
+        model_input = f"Kullanici sorusu: {text}\n\nTool kaniti:\n{tool_context}"
+
+    if intent.category == "agent_task":
+        agent_res = services.agent_mode.run(
+            text=text,
+            workspace=payload.workspace,
+            model=payload.model,
+            profile_context=services.profile.prompt_context(),
+            memory_context=merged_memory,
+            response_style=style_decision.style,
+        )
+        result = agent_res.final
+    else:
+        result = services.openclaw.run_action(
+            model_input,
+            workspace=payload.workspace,
+            model=payload.model,
+            history=history,
+            profile_context=services.profile.prompt_context(),
+            memory_context=merged_memory,
+            response_style=style_decision.style,
+            route_name="chat",
+        )
 
     reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
 
@@ -92,7 +129,18 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
             "memory_hits": memory_hits,
             "used_model": result.used_model or "",
             "model_locked": result.model_locked,
+            "response_style": style_decision.style,
+            "intent": intent.category,
+            "tool": tool_result.selected_tool,
         },
+    )
+    services.long_memory.sync_profile(profile_data)
+    services.long_memory.append_conversation(
+        session_id=session.id,
+        user_text=text,
+        assistant_text=reply,
+        intent=intent.category,
+        style=style_decision.style,
     )
 
     return ChatResponse(
@@ -108,5 +156,8 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
             "memory_hits": memory_hits,
             "used_model": result.used_model or "",
             "model_locked": result.model_locked,
+            "response_style": style_decision.style,
+            "intent": intent.category,
+            "tool": tool_result.selected_tool,
         },
     )

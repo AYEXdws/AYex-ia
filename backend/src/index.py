@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from backend.src.routes.action import router as action_router
 from backend.src.routes.chat import router as chat_router
+from backend.src.routes.events import router as events_router
 from backend.src.routes.health import router as health_router
 from backend.src.routes.history import router as history_router
 from backend.src.routes.profile import router as profile_router
@@ -24,6 +25,7 @@ app.include_router(action_router)
 app.include_router(history_router)
 app.include_router(profile_router)
 app.include_router(usage_router)
+app.include_router(events_router)
 
 if not app.state.services.settings.web_mvp_only:
     from backend.src.routes.audio import router as audio_router

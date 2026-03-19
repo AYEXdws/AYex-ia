@@ -12,7 +12,7 @@ if [[ -f .env ]]; then
 fi
 
 export AYEX_WEB_MVP_ONLY="${AYEX_WEB_MVP_ONLY:-true}"
-export OPENCLAW_ENABLED="${OPENCLAW_ENABLED:-true}"
+export OPENCLAW_ENABLED="${OPENCLAW_ENABLED:-false}"
 export OPENCLAW_BASE_URL="${OPENCLAW_BASE_URL:-http://127.0.0.1:18789}"
 export OPENCLAW_MODE="${OPENCLAW_MODE:-openai_chat_completions}"
 export OPENCLAW_MODEL="${OPENCLAW_MODEL:-openai/gpt-4o-mini}"

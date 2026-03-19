@@ -10,21 +10,21 @@ class IntentResult:
 
 
 class IntentRouter:
-    """First-pass deterministic intent routing for low-latency path decisions."""
+    """Intent detector for chat/search/market/url_read/agent_task."""
 
     def route(self, text: str) -> IntentResult:
         normalized = self._normalize(text)
         tokens = set(normalized.split())
 
-        if self._is_simple_command(normalized, tokens):
-            return IntentResult(category="simple_command", confidence=0.9)
-        if self._is_memory_request(normalized, tokens):
-            return IntentResult(category="memory_request", confidence=0.8)
-        if self._is_device_action(normalized, tokens):
-            return IntentResult(category="future_device_action", confidence=0.75)
-        if text.strip().endswith("?") or tokens.intersection({"ne", "neden", "nasil", "kim", "hangi", "kac"}):
-            return IntentResult(category="question", confidence=0.7)
-        return IntentResult(category="conversation", confidence=0.6)
+        if self._has_url(normalized):
+            return IntentResult(category="url_read", confidence=0.94)
+        if self._is_agent_task(normalized):
+            return IntentResult(category="agent_task", confidence=0.9)
+        if self._is_market_request(normalized, tokens):
+            return IntentResult(category="market", confidence=0.9)
+        if self._is_search_request(normalized, tokens):
+            return IntentResult(category="search", confidence=0.86)
+        return IntentResult(category="chat", confidence=0.72)
 
     def _normalize(self, text: str) -> str:
         out = text.lower()
@@ -40,26 +40,25 @@ class IntentRouter:
             out = out.replace(src, dst)
         return " ".join(out.split())
 
-    def _is_simple_command(self, text: str, tokens: set[str]) -> bool:
-        if any(k in text for k in ["saat kac", "tarih", "bugun gunlerden", "bugun ne gunu"]):
-            return True
-        quick_words = {"selam", "merhaba", "nasilsin", "kimsin", "adin", "ismin"}
-        return len(tokens) <= 4 and bool(tokens.intersection(quick_words))
+    def _has_url(self, text: str) -> bool:
+        return "http://" in text or "https://" in text or "www." in text
 
-    def _is_memory_request(self, text: str, tokens: set[str]) -> bool:
-        keys = {"hatirla", "hafiza", "bellek", "profil", "tercih", "son konu", "en son konu"}
-        return any(k in text for k in keys) or bool(tokens.intersection({"profil", "bellek", "hafiza"}))
-
-    def _is_device_action(self, text: str, tokens: set[str]) -> bool:
-        keys = {
-            "telefon",
-            "bildirim",
-            "arama",
-            "mesaj",
-            "wifi",
-            "bluetooth",
-            "kamera",
-            "sensor",
-            "alarm",
+    def _is_search_request(self, text: str, tokens: set[str]) -> bool:
+        triggers = {
+            "arastir",
+            "arasir",
+            "ara",
+            "internette",
+            "webde",
+            "googlela",
+            "nedir",
+            "kimdir",
         }
-        return bool(tokens.intersection(keys))
+        return bool(tokens.intersection(triggers)) or "hakkinda bilgi" in text
+
+    def _is_market_request(self, text: str, tokens: set[str]) -> bool:
+        keys = {"piyasa", "btc", "bitcoin", "eth", "ethereum", "altin", "dolar", "kur", "kripto"}
+        return bool(tokens.intersection(keys)) or "piyasa" in text
+
+    def _is_agent_task(self, text: str) -> bool:
+        return any(k in text for k in ("arastir", "analiz et", "karsilastir", "rapor hazirla", "plan cikar"))

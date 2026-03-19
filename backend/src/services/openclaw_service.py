@@ -28,6 +28,7 @@ class OpenClawResult:
     context_messages: int = 0
     used_model: str = ""
     model_locked: bool = False
+    response_style: str = "normal"
 
 
 class OpenClawService:
@@ -49,6 +50,7 @@ class OpenClawService:
         history: list[dict[str, str]] | None = None,
         profile_context: str | None = None,
         memory_context: str | None = None,
+        response_style: str = "normal",
         route_name: str = "action",
     ) -> OpenClawResult:
         if not self.is_enabled():
@@ -60,6 +62,7 @@ class OpenClawService:
                 history=history,
                 profile_context=profile_context,
                 memory_context=memory_context,
+                response_style=response_style,
                 route_name=route_name,
             )
 
@@ -72,8 +75,8 @@ class OpenClawService:
         model_name = self._resolve_model(model)
         context = self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns)
         context_messages = len(context)
-        token_budget = self._compute_token_budget(prompt)
-        system_prompt = self._compose_system_prompt(profile_context, memory_context)
+        token_budget = self._compute_token_budget(prompt, response_style=response_style)
+        system_prompt = self._compose_system_prompt(profile_context, memory_context, response_style=response_style)
 
         cache_key = self._cache_key(
             mode=mode,
@@ -155,6 +158,7 @@ class OpenClawService:
                 context_messages=context_messages,
                 used_model=self._extract_used_model(data, fallback=model_name),
                 model_locked=self.settings.openclaw_force_model,
+                response_style=response_style,
             )
 
         try:
@@ -175,6 +179,7 @@ class OpenClawService:
                 context_messages=context_messages,
                 used_model=model_name,
                 model_locked=self.settings.openclaw_force_model,
+                response_style=response_style,
             )
 
     def _run_direct_openai(
@@ -185,6 +190,7 @@ class OpenClawService:
         history: list[dict[str, str]] | None = None,
         profile_context: str | None = None,
         memory_context: str | None = None,
+        response_style: str = "normal",
         route_name: str = "action",
     ) -> OpenClawResult:
         prompt = (text or "").strip()
@@ -203,8 +209,8 @@ class OpenClawService:
             response = self.openai.call_responses(
                 prompt=enriched,
                 model=model_name,
-                instructions=self._compose_system_prompt(profile_context, memory_context),
-                max_output_tokens=self._compute_token_budget(prompt),
+                instructions=self._compose_system_prompt(profile_context, memory_context, response_style=response_style),
+                max_output_tokens=self._compute_token_budget(prompt, response_style=response_style),
                 route_name=route_name,
             )
             return OpenClawResult(
@@ -214,10 +220,11 @@ class OpenClawService:
                 source="openai_direct",
                 latency_ms=response.latency_ms,
                 cache_hit=False,
-                token_budget=self._compute_token_budget(prompt),
+                token_budget=self._compute_token_budget(prompt, response_style=response_style),
                 context_messages=len(self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns)),
                 used_model=response.used_model,
                 model_locked=False,
+                response_style=response_style,
             )
         except Exception as exc:
             logger.error("OPENAI_DIRECT_FAILURE route=%s model=%s error=%s", route_name, model_name, exc)
@@ -234,10 +241,11 @@ class OpenClawService:
                 source="openai_direct",
                 latency_ms=latency_ms,
                 cache_hit=False,
-                token_budget=self._compute_token_budget(prompt),
+                token_budget=self._compute_token_budget(prompt, response_style=response_style),
                 context_messages=len(self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns)),
                 used_model=normalized_model,
                 model_locked=False,
+                response_style=response_style,
             )
 
     def _compose_direct_prompt(
@@ -339,9 +347,16 @@ class OpenClawService:
             clean.append({"role": role, "content": content[:2000]})
         return clean
 
-    def _compose_system_prompt(self, profile_context: str | None, memory_context: str | None) -> str:
+    def _compose_system_prompt(self, profile_context: str | None, memory_context: str | None, response_style: str = "normal") -> str:
         base = self.settings.openclaw_instructions.strip()
         parts = [base]
+        style_hint = (response_style or "normal").strip().lower()
+        if style_hint == "brief":
+            parts.append("Yanit format stili: brief (2-4 cumle, kisa ve net).")
+        elif style_hint == "deep":
+            parts.append("Yanit format stili: deep (detayli analiz, gerektiginde maddeli).")
+        else:
+            parts.append("Yanit format stili: normal (1-2 paragraf, net ve aciklayici).")
         profile = (profile_context or "").strip()
         memory = (memory_context or "").strip()
         if profile:
@@ -354,17 +369,23 @@ class OpenClawService:
             parts.append(f"Uzun sureli sohbet baglami: {memory[:1600]}")
         return "\n\n".join(parts)
 
-    def _compute_token_budget(self, prompt: str) -> int:
-        base = self.settings.openclaw_max_output_tokens
+    def _compute_token_budget(self, prompt: str, response_style: str = "normal") -> int:
+        style = (response_style or "normal").strip().lower()
+        if style == "brief":
+            base = max(220, min(340, self.settings.openclaw_max_output_tokens))
+        elif style == "deep":
+            base = max(580, min(900, self.settings.openclaw_max_output_tokens + 320))
+        else:
+            base = max(320, min(640, self.settings.openclaw_max_output_tokens + 180))
         words = len(prompt.split())
         if words <= 6:
-            return max(56, min(96, base))
+            return max(int(base * 0.85), min(int(base * 0.95), base))
         if words <= 14:
-            return max(72, min(120, base))
+            return max(int(base * 0.9), min(int(base * 0.97), base))
         if words >= 40:
-            return min(260, max(base + 70, 150))
+            return min(1200, max(base + 120, int(base * 1.12)))
         if words >= 24:
-            return min(220, max(base + 40, 120))
+            return min(1000, max(base + 80, int(base * 1.08)))
         return base
 
     def _cache_key(
@@ -402,6 +423,7 @@ class OpenClawService:
                 context_messages=res.context_messages,
                 used_model=res.used_model,
                 model_locked=res.model_locked,
+                response_style=res.response_style,
             )
 
     def _cache_set(self, key: str, result: OpenClawResult) -> None:

@@ -36,7 +36,7 @@ class BackendSettings:
 
 
 def load_settings() -> BackendSettings:
-    openclaw_enabled_raw = os.environ.get("OPENCLAW_ENABLED", "true").strip().lower()
+    openclaw_enabled_raw = os.environ.get("OPENCLAW_ENABLED", "false").strip().lower()
     openclaw_enabled = openclaw_enabled_raw in {"1", "true", "yes", "on"}
     web_mvp_only_raw = os.environ.get("AYEX_WEB_MVP_ONLY", "true").strip().lower()
     web_mvp_only = web_mvp_only_raw in {"1", "true", "yes", "on"}
@@ -60,7 +60,7 @@ def load_settings() -> BackendSettings:
         openclaw_max_output_tokens=max(24, int(os.environ.get("OPENCLAW_MAX_OUTPUT_TOKENS", "80"))),
         openclaw_instructions=(
             os.environ.get("OPENCLAW_INSTRUCTIONS")
-            or "Her zaman Turkce cevap ver. Kisa, net ve dogal yaz. Basit sorularda 2-4 cumle kullan; analiz gereken durumda maddeli ve yapisal yanit ver."
+            or "Her zaman Turkce cevap ver. Net, dogal ve tutarli ol. Yanit uzunlugunu baglama ve istenen stile gore ayarla."
         ).strip(),
         openclaw_timeout_sec=max(4, int(os.environ.get("OPENCLAW_TIMEOUT_SEC", "12"))),
         openclaw_context_turns=max(0, min(12, int(os.environ.get("OPENCLAW_CONTEXT_TURNS", "6")))),

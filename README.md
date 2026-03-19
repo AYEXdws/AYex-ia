@@ -39,6 +39,7 @@ project-root/
       memory/
       routes/
       services/
+      tools/
       utils/
       index.py
   esp32-client/
@@ -159,6 +160,28 @@ Bu modda:
 - `/chat` ve `/action` dogrudan OpenAI istemcisi ile calisir.
 - `localhost:18789` kontrolu/istegi yapilmaz.
 - Direct OpenAI cagrisi `OPENAI_CALL_START/SUCCESS/ERROR` loglari ile izlenir.
+- Varsayilan akis `OPENCLAW_ENABLED=false` olacak sekilde ayarlanmistir.
+
+## Evolution layers (new)
+
+- `response_style`: `brief | normal | deep` algilama ve dinamik token butcesi
+- `tools`:
+  - `search_tool`
+  - `fetch_url_tool`
+  - `market_tool`
+- `intent`: `chat | search | market | url_read | agent_task`
+- `memory`:
+  - `.ayex/memory_profile.json`
+  - `.ayex/memory_conversations.jsonl`
+  - `.ayex/memory_events.jsonl`
+- `agent mode`: hedef -> plan -> sinirli tool call -> final synthesis
+- `n8n ingest`: `POST /events/ingest`
+
+## Quick smoke test
+
+```bash
+./scripts/smoke_ai_evolution.sh
+```
 
 ## ESP32 PlatformIO run
 
