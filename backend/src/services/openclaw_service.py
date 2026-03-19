@@ -10,6 +10,10 @@ from urllib import request as urlrequest
 from backend.src.config.env import BackendSettings
 from backend.src.services.agent_registry import AgentRegistry
 from backend.src.services.http_utils import parse_json_bytes, with_retries
+from backend.src.services.openai_client import OpenAIDirectClient
+from backend.src.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -30,6 +34,7 @@ class OpenClawService:
     def __init__(self, settings: BackendSettings, agents: AgentRegistry):
         self.settings = settings
         self.agents = agents
+        self.openai = OpenAIDirectClient(settings)
         self._cache: dict[str, tuple[float, OpenClawResult]] = {}
         self._cache_lock = threading.Lock()
 
@@ -44,8 +49,10 @@ class OpenClawService:
         history: list[dict[str, str]] | None = None,
         profile_context: str | None = None,
         memory_context: str | None = None,
+        route_name: str = "action",
     ) -> OpenClawResult:
         if not self.is_enabled():
+            logger.info("ROUTE_SELECTED=openai_direct route=%s", route_name)
             return self._run_direct_openai(
                 text=text,
                 workspace=workspace,
@@ -53,8 +60,10 @@ class OpenClawService:
                 history=history,
                 profile_context=profile_context,
                 memory_context=memory_context,
+                route_name=route_name,
             )
 
+        logger.info("ROUTE_SELECTED=openclaw route=%s", route_name)
         mode = self.settings.openclaw_mode
         if mode not in {"action", "openai_responses", "openai_chat_completions"}:
             return OpenClawResult(ok=False, text=f"OpenClaw mod gecersiz: {mode}", raw={})
@@ -132,6 +141,8 @@ class OpenClawService:
             with urlrequest.urlopen(req, timeout=self.settings.openclaw_timeout_sec) as resp:
                 data = parse_json_bytes(resp.read())
             text_out = self._extract_text(data)
+            if not text_out:
+                raise RuntimeError("OpenClaw returned empty model text")
             latency_ms = int((time.perf_counter() - started) * 1000)
             return OpenClawResult(
                 ok=True,
@@ -151,6 +162,7 @@ class OpenClawService:
             self._cache_set(cache_key, result)
             return result
         except Exception as exc:
+            logger.error("OPENCLAW_CALL_ERROR route=%s mode=%s error=%s", route_name, mode, exc)
             latency_ms = int((time.perf_counter() - started) * 1000)
             return OpenClawResult(
                 ok=False,
@@ -173,45 +185,52 @@ class OpenClawService:
         history: list[dict[str, str]] | None = None,
         profile_context: str | None = None,
         memory_context: str | None = None,
+        route_name: str = "action",
     ) -> OpenClawResult:
         prompt = (text or "").strip()
+        model_name = self._resolve_model(model)
         started = time.perf_counter()
         try:
-            agent = self.agents.get_agent(workspace=workspace, model=model)
+            # Deliberately bypass agent-level canned fallback text when OpenClaw is disabled.
+            # In this mode we must return only real model output or an explicit failure.
             enriched = self._compose_direct_prompt(
                 prompt=prompt,
                 history=history or [],
                 profile_context=profile_context,
                 memory_context=memory_context,
             )
-            reply = agent.safe_handle_input(enriched)
-            latency_ms = int((time.perf_counter() - started) * 1000)
-            metrics = agent.get_last_metrics() if hasattr(agent, "get_last_metrics") else {}
-            used_model = str(metrics.get("chat_model_used") or metrics.get("chat_model") or model or "").strip()
+            response = self.openai.call_responses(
+                prompt=enriched,
+                model=model_name,
+                instructions=self._compose_system_prompt(profile_context, memory_context),
+                max_output_tokens=self._compute_token_budget(prompt),
+                route_name=route_name,
+            )
             return OpenClawResult(
                 ok=True,
-                text=reply or "Yanit üretilemedi.",
-                raw={"mode": "direct_openai", "metrics": metrics},
-                source="openai",
-                latency_ms=latency_ms,
+                text=response.text,
+                raw={**response.raw, "_mode": "openai_direct"},
+                source="openai_direct",
+                latency_ms=response.latency_ms,
                 cache_hit=False,
                 token_budget=self._compute_token_budget(prompt),
                 context_messages=len(self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns)),
-                used_model=used_model,
+                used_model=response.used_model,
                 model_locked=False,
             )
         except Exception as exc:
+            logger.error("OPENAI_DIRECT_FAILURE route=%s model=%s error=%s", route_name, model_name, exc)
             latency_ms = int((time.perf_counter() - started) * 1000)
             return OpenClawResult(
                 ok=False,
-                text=self._friendly_error(str(exc)),
-                raw={"error": str(exc), "mode": "direct_openai"},
-                source="openai",
+                text="Model yaniti alinamadi. Lutfen tekrar dene.",
+                raw={"error": str(exc), "mode": "openai_direct"},
+                source="openai_direct",
                 latency_ms=latency_ms,
                 cache_hit=False,
                 token_budget=self._compute_token_budget(prompt),
                 context_messages=len(self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns)),
-                used_model=str(model or "").strip(),
+                used_model=model_name,
                 model_locked=False,
             )
 
@@ -271,7 +290,7 @@ class OpenClawService:
                             chunks.append(text)
             if chunks:
                 return self._localize_fallback("".join(chunks).strip())
-        return "OpenClaw islem tamamladi."
+        return ""
 
     def _localize_fallback(self, text: str) -> str:
         t = text.strip()
@@ -284,10 +303,10 @@ class OpenClawService:
         if "401" in low:
             return "Kimlik doğrulama hatası (401). API anahtarını kontrol et."
         if "timed out" in low or "timeout" in low:
-            return "Yanıt gecikti. Tekrar dene."
+            return "Model yaniti alinamadi. Lutfen tekrar dene."
         if "connection refused" in low or "failed to establish" in low:
-            return "Servise bağlanılamadı. Ağ veya servis durumunu kontrol et."
-        return "İstek sırasında bağlantı hatası oluştu."
+            return "Model yaniti alinamadi. Lutfen tekrar dene."
+        return "Model yaniti alinamadi. Lutfen tekrar dene."
 
     def _responses_input(self, prompt: str, history: list[dict[str, str]]) -> str:
         if not history:

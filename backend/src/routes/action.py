@@ -28,7 +28,7 @@ def _compact_raw(raw: dict) -> dict:
 
 @router.post("/action", response_model=ActionResponse)
 def action(payload: ActionRequest, services: BackendServices = Depends(get_services)) -> ActionResponse:
-    ai_source = "openclaw" if services.settings.openclaw_enabled else "openai"
+    ai_source = "openclaw" if services.settings.openclaw_enabled else "openai_direct"
     text = (payload.text or "").strip()
     if not text:
         return ActionResponse(
@@ -58,7 +58,7 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
         max_age_sec=services.settings.openclaw_cache_ttl_sec,
     )
     if dedup is not None:
-        reply = str(dedup.get("text") or "").strip() or "Yanit uretemedi."
+        reply = str(dedup.get("text") or "").strip() or "Model yaniti alinamadi. Lutfen tekrar dene."
         prev_metrics = dedup.get("metrics") or {}
         prev_ok = bool(prev_metrics.get("ok", True))
         services.chat_store.append_message(session.id, role="user", text=text, source="user")
@@ -104,9 +104,10 @@ def action(payload: ActionRequest, services: BackendServices = Depends(get_servi
         history=history,
         profile_context=profile_context,
         memory_context=memory_context,
+        route_name="action",
     )
 
-    reply = result.text if result.text else "Baglanti hatasi."
+    reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
     services.chat_store.append_message(

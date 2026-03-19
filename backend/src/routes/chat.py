@@ -11,7 +11,7 @@ router = APIRouter()
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)) -> ChatResponse:
-    ai_source = "openclaw" if services.settings.openclaw_enabled else "openai"
+    ai_source = "openclaw" if services.settings.openclaw_enabled else "openai_direct"
     text = (payload.text or "").strip()
     if not text:
         return ChatResponse(reply="Bos mesaj gonderilemez.", session_id=payload.session_id or "", metrics={"ok": False})
@@ -31,7 +31,7 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
         max_age_sec=services.settings.openclaw_cache_ttl_sec,
     )
     if dedup is not None:
-        reply = str(dedup.get("text") or "").strip() or "Yanit uretemedi."
+        reply = str(dedup.get("text") or "").strip() or "Model yaniti alinamadi. Lutfen tekrar dene."
         prev_metrics = dedup.get("metrics") or {}
         prev_ok = bool(prev_metrics.get("ok", True))
         services.chat_store.append_message(session.id, role="user", text=text, source="user")
@@ -72,9 +72,10 @@ def chat(payload: ChatRequest, services: BackendServices = Depends(get_services)
         history=history,
         profile_context=services.profile.prompt_context(),
         memory_context=memory_context,
+        route_name="chat",
     )
 
-    reply = result.text if result.text else "Baglanti hatasi."
+    reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
     services.chat_store.append_message(

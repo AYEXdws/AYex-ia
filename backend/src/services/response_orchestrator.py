@@ -10,6 +10,9 @@ from backend.src.services.stt_service import SpeechToTextService
 from backend.src.services.tool_router import ToolRouter
 from backend.src.services.tts_service import TextToSpeechService
 from backend.src.services.voice_response import VoiceResponseService
+from backend.src.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -56,10 +59,24 @@ class ResponseOrchestrator:
                 intent=intent,
             )
 
-        result = self.openclaw_service.run_action(transcript, workspace=workspace, model=model)
-        reply = result.text if result.ok else "Yanit alinamadi."
+        result = self.openclaw_service.run_action(
+            transcript,
+            workspace=workspace,
+            model=model,
+            route_name="audio_turn",
+        )
+        reply = result.text if result.ok else "Model yaniti alinamadi. Lutfen tekrar dene."
+        logger.info(
+            "AUDIO_ROUTE_REPLY source=%s ok=%s latency_ms=%s",
+            result.source,
+            result.ok,
+            result.latency_ms,
+        )
 
-        wav_reply = self.tts_service.synthesize_wav_bytes(reply or "Ahmet, seni duydum.", voice=voice)
+        wav_reply = self.tts_service.synthesize_wav_bytes(
+            reply or "Model yaniti alinamadi. Lutfen tekrar dene.",
+            voice=voice,
+        )
         return AudioTurnResult(
             transcript=transcript,
             reply=reply,

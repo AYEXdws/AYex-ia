@@ -77,7 +77,9 @@ def load_settings() -> BackendSettings:
 
 
 def openai_api_key() -> str:
+    # OPENAI_API_KEY is the primary key name.
+    # AYEX_API_KEY is kept only as a legacy fallback for old env files.
     key = (os.environ.get("OPENAI_API_KEY") or os.environ.get("AYEX_API_KEY") or "").strip()
     if not key:
-        raise RuntimeError("OPENAI_API_KEY veya AYEX_API_KEY tanimli degil.")
+        raise RuntimeError("OPENAI_API_KEY tanimli degil (AYEX_API_KEY legacy fallback da bos).")
     return key

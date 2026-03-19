@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 
 from backend.src.config.env import BackendSettings, load_settings
 from backend.src.memory.manager import MemoryManager
@@ -15,6 +16,9 @@ from backend.src.services.stt_service import SpeechToTextService
 from backend.src.services.tool_router import ToolRouter
 from backend.src.services.tts_service import TextToSpeechService
 from backend.src.services.voice_response import VoiceResponseService
+from backend.src.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -36,6 +40,18 @@ class BackendServices:
 
 def build_services() -> BackendServices:
     settings = load_settings()
+    openai_primary = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    openai_legacy = (os.environ.get("AYEX_API_KEY") or "").strip()
+    if settings.openclaw_enabled:
+        logger.info("CONFIG_MODE openclaw_enabled=true")
+    else:
+        logger.info("CONFIG_MODE openclaw_enabled=false (direct OpenAI primary path)")
+    if openai_primary:
+        logger.info("OPENAI_KEY_SOURCE OPENAI_API_KEY")
+    elif openai_legacy:
+        logger.warning("OPENAI_KEY_SOURCE AYEX_API_KEY (legacy fallback)")
+    else:
+        logger.error("OPENAI_KEY_MISSING OPENAI_API_KEY is empty (AYEX_API_KEY fallback also empty)")
     agents = AgentRegistry()
     stt = SpeechToTextService(settings)
     tts = TextToSpeechService(settings)
