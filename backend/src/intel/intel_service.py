@@ -11,6 +11,104 @@ from backend.src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _normalize_text(text: str) -> str:
+    low = (text or "").lower()
+    table = str.maketrans(
+        {
+            "ç": "c",
+            "ğ": "g",
+            "ı": "i",
+            "İ": "i",
+            "ö": "o",
+            "ş": "s",
+            "ü": "u",
+        }
+    )
+    return low.translate(table)
+
+
+def _tokenize(text: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9_]{3,}", _normalize_text(text)) if len(t) >= 4}
+
+
+def _freshness_for_timestamp(ts: datetime) -> tuple[float, str, float]:
+    now_utc = datetime.utcnow()
+    event_ts = ts
+    if event_ts.tzinfo is not None:
+        event_ts = event_ts.astimezone(timezone.utc).replace(tzinfo=None)
+    age_hours = max(0.0, (now_utc - event_ts).total_seconds() / 3600.0)
+    if age_hours < 6:
+        return 1.15, "<6h", 1.0
+    if age_hours < 24:
+        return 1.08, "<24h", 0.75
+    if age_hours < 72:
+        return 1.00, "<72h", 0.5
+    return 0.90, ">72h", 0.25
+
+
+def _topic_keywords() -> dict[str, tuple[str, ...]]:
+    return {
+        "crypto": ("crypto", "kripto", "btc", "bitcoin", "eth", "ethereum", "altcoin", "stablecoin", "usdt"),
+        "market": ("market", "piyasa", "trading", "borsa", "fiyat", "price", "likidite", "liquidity"),
+        "economy": ("economy", "ekonomi", "enflasyon", "faiz", "fed", "rate", "cpi", "macro", "makro"),
+        "security": ("security", "guvenlik", "breach", "hack", "saldiri", "ihlal", "sizinti", "ransomware", "cyber"),
+        "global": ("global", "jeopolitik", "geopolitic", "savas", "war", "sanction", "ticaret", "trade"),
+        "company": ("company", "sirket", "earnings", "bilanco", "ceo", "kurumsal", "corporate"),
+        "tech": ("tech", "teknoloji", "ai", "outage", "cloud", "infrastructure", "altyapi", "chip", "semiconductor"),
+    }
+
+
+def extract_query_topics(query: str) -> dict:
+    q_norm = _normalize_text(query)
+    q_tokens = _tokenize(q_norm)
+    topics: list[str] = []
+    category_bias: list[str] = []
+    topic_to_category = {
+        "crypto": "economy",
+        "market": "economy",
+        "economy": "economy",
+        "security": "security",
+        "global": "global",
+        "company": "other",
+        "tech": "tech",
+    }
+    for topic, keywords in _topic_keywords().items():
+        if any(k in q_norm for k in keywords):
+            topics.append(topic)
+            mapped = topic_to_category.get(topic)
+            if mapped and mapped not in category_bias:
+                category_bias.append(mapped)
+    if not topics and any(k in q_norm for k in ("risk", "impact", "etki", "watch", "izle", "analiz")):
+        topics.append("market")
+        category_bias.append("economy")
+    return {
+        "topics": topics,
+        "tokens": sorted(list(q_tokens))[:30],
+        "category_bias": category_bias,
+    }
+
+
+def _event_topic_hits(event: IntelEvent, query_topics: list[str]) -> float:
+    if not query_topics:
+        return 0.0
+    blob = " ".join(
+        [
+            str(event.title or ""),
+            str(event.summary or ""),
+            str(event.category or ""),
+            " ".join([str(t) for t in (event.tags or [])]),
+        ]
+    )
+    blob_norm = _normalize_text(blob)
+    keys = _topic_keywords()
+    hits = 0
+    for topic in query_topics:
+        kws = keys.get(topic, ())
+        if any(k in blob_norm for k in kws):
+            hits += 1
+    return min(1.0, hits / max(1, len(query_topics)))
+
+
 class IntelService:
     def __init__(self, store: IntelStore, openai_client=None):
         self.store = store
@@ -289,25 +387,9 @@ def build_intel_context(service: IntelService, user_id: str, *, max_events: int 
     scored = sorted(events, key=lambda e: float(e.final_score), reverse=True)
     filtered = service.filter_by_user_profile(scored, user_id=user_id)
 
-    now_utc = datetime.utcnow()
     ranked_events: list[tuple[float, float, str, IntelEvent]] = []
     for event in filtered:
-        ts = event.timestamp
-        if ts.tzinfo is not None:
-            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
-        age_hours = max(0.0, (now_utc - ts).total_seconds() / 3600.0)
-        if age_hours < 6:
-            freshness_multiplier = 1.15
-            time_window = "<6h"
-        elif age_hours < 24:
-            freshness_multiplier = 1.08
-            time_window = "<24h"
-        elif age_hours < 72:
-            freshness_multiplier = 1.00
-            time_window = "<72h"
-        else:
-            freshness_multiplier = 0.90
-            time_window = ">72h"
+        freshness_multiplier, time_window, _ = _freshness_for_timestamp(event.timestamp)
         effective_score = float(event.final_score) * freshness_multiplier
         ranked_events.append((effective_score, freshness_multiplier, time_window, event))
 
@@ -386,4 +468,130 @@ def build_intel_context(service: IntelService, user_id: str, *, max_events: int 
         "signals": dedup_signals,
         "confidence": round(confidence, 4),
         "recency_note": f"dominant_time_window={dominant_time_window}",
+    }
+
+
+def select_relevant_intel_context(
+    service: IntelService,
+    query: str,
+    user_id: str,
+    max_events: int = 5,
+) -> dict:
+    query_info = extract_query_topics(query)
+    query_tokens = set(query_info.get("tokens") or [])
+    query_topics = list(query_info.get("topics") or [])
+    query_categories = set(query_info.get("category_bias") or [])
+
+    events = service.store.get_all_events()
+    filtered = service.filter_by_user_profile(events, user_id=user_id)
+    ranked: list[tuple[float, float, float, float, str, IntelEvent]] = []
+
+    for event in filtered:
+        title_tokens = _tokenize(event.title)
+        summary_tokens = _tokenize(event.summary)
+        tag_tokens = _tokenize(" ".join([str(t) for t in (event.tags or [])]))
+        category_tokens = _tokenize(event.category) or {_normalize_text(event.category)}
+
+        title_overlap = len(query_tokens & title_tokens)
+        summary_overlap = len(query_tokens & summary_tokens)
+        tag_overlap = len(query_tokens & tag_tokens)
+        category_overlap = len(query_tokens & category_tokens)
+
+        overlap_raw = (title_overlap * 2.0) + (tag_overlap * 1.8) + (category_overlap * 1.4) + (summary_overlap * 1.0)
+        overlap_norm = min(1.0, overlap_raw / max(2.0, float(len(query_tokens) * 1.7)))
+
+        topic_hit = _event_topic_hits(event, query_topics)
+        category_bias_boost = 0.15 if query_categories and _normalize_text(event.category) in query_categories else 0.0
+        query_match_score = min(1.0, (overlap_norm * 0.72) + (topic_hit * 0.28) + category_bias_boost)
+
+        freshness_multiplier, time_window, freshness_bonus = _freshness_for_timestamp(event.timestamp)
+        effective_relevance_score = (query_match_score * 0.60) + (float(event.final_score) * 0.25) + (freshness_bonus * 0.15)
+        ranked.append(
+            (
+                float(effective_relevance_score),
+                float(query_match_score),
+                float(freshness_multiplier),
+                float(freshness_bonus),
+                time_window,
+                event,
+            )
+        )
+
+    ranked.sort(key=lambda x: x[0], reverse=True)
+
+    seen_titles: set[str] = set()
+    key_events: list[dict] = []
+    time_windows: list[str] = []
+    for effective_score, query_score, freshness_multiplier, _, time_window, event in ranked:
+        normalized = re.sub(r"\s+", " ", _normalize_text(event.title))
+        if not normalized or normalized in seen_titles:
+            continue
+        if query_score < 0.12 and key_events:
+            continue
+        seen_titles.add(normalized)
+        time_windows.append(time_window)
+        key_events.append(
+            {
+                "title": event.title,
+                "summary": str(event.summary or "")[:220],
+                "category": event.category,
+                "score": round(float(event.final_score), 4),
+                "effective_score": round(float(effective_score), 4),
+                "query_match_score": round(float(query_score), 4),
+                "freshness_multiplier": round(float(freshness_multiplier), 2),
+                "importance": int(event.importance),
+                "source": event.source,
+                "tags": list(event.tags or [])[:4],
+                "timestamp": event.timestamp.isoformat(),
+            }
+        )
+        if len(key_events) >= max(1, min(5, max_events)):
+            break
+
+    trend_keywords = ("rise", "rises", "surge", "growth", "improves", "record")
+    anomaly_keywords = ("breach", "outage", "crash", "urgent", "spike")
+    risk_keywords = ("risk", "regulation", "breach", "outage", "volatility", "sanction")
+    signals: list[str] = []
+    for ev in key_events:
+        title_low = str(ev.get("title") or "").lower()
+        tags_low = " ".join([str(t).lower() for t in ev.get("tags") or []])
+        mixed = f"{title_low} {tags_low}"
+        if any(k in mixed for k in trend_keywords):
+            signals.append(f"trend:{ev.get('title')}")
+        if any(k in mixed for k in anomaly_keywords):
+            signals.append(f"anomaly:{ev.get('title')}")
+        if any(k in mixed for k in risk_keywords):
+            signals.append(f"risk:{ev.get('title')}")
+    dedup_signals: list[str] = []
+    seen_signals: set[str] = set()
+    for signal in signals:
+        if signal in seen_signals:
+            continue
+        seen_signals.add(signal)
+        dedup_signals.append(signal)
+        if len(dedup_signals) >= 8:
+            break
+
+    if key_events:
+        topics_text = ", ".join(query_topics) if query_topics else "general"
+        summary = " | ".join(
+            [f"{item['title']} (q:{item['query_match_score']:.2f}, score:{item['effective_score']:.2f})" for item in key_events[:3]]
+        )
+        summary = f"Query topics={topics_text}. {summary}"
+    else:
+        summary = "No relevant events matched the current query focus."
+
+    dominant_time_window = max(set(time_windows), key=time_windows.count) if time_windows else "unknown"
+    confidence = 0.0
+    if key_events:
+        confidence = sum(float(item["effective_score"]) for item in key_events) / float(len(key_events))
+        confidence = max(0.0, min(1.0, confidence))
+
+    return {
+        "key_events": key_events,
+        "summary": summary[:900],
+        "signals": dedup_signals,
+        "confidence": round(confidence, 4),
+        "recency_note": f"dominant_time_window={dominant_time_window}",
+        "query_focus": query_info,
     }

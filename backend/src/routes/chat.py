@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from backend.src.intel.intel_service import build_intel_context
+from backend.src.intel.intel_service import build_intel_context, select_relevant_intel_context
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
@@ -85,12 +85,21 @@ def get_latest_intel(services: BackendServices, *, user_id: str = "default") -> 
         return {}
 
 
-def format_intel_for_prompt(intel_context: dict[str, Any]) -> str:
+def format_intel_for_prompt(intel_context: dict[str, Any], *, relevant: bool = False) -> str:
     key_events = intel_context.get("key_events") or []
     signals = intel_context.get("signals") or []
     summary = str(intel_context.get("summary") or "").strip()
     confidence = float(intel_context.get("confidence") or 0.0)
     recency_note = str(intel_context.get("recency_note") or "").strip()
+    query_focus = intel_context.get("query_focus") or {}
+    focus_topics = query_focus.get("topics") or []
+    focus_bias = query_focus.get("category_bias") or []
+    focus_tokens = query_focus.get("tokens") or []
+    focus_text = (
+        f"topics={', '.join(focus_topics) if focus_topics else 'general'} | "
+        f"category_bias={', '.join(focus_bias) if focus_bias else 'none'} | "
+        f"tokens={', '.join([str(t) for t in focus_tokens[:8]]) if focus_tokens else 'none'}"
+    )
 
     event_lines = []
     for idx, item in enumerate(key_events[:5], start=1):
@@ -107,8 +116,12 @@ def format_intel_for_prompt(intel_context: dict[str, Any]) -> str:
     if not signal_lines:
         signal_lines = ["- No extracted signal."]
 
+    header = "RELEVANT INTELLIGENCE DATA" if relevant else "INTELLIGENCE DATA"
     return (
-        "INTELLIGENCE DATA:\n"
+        "QUERY FOCUS:\n"
+        + focus_text
+        + "\n\n"
+        + f"{header}:\n"
         "- Key Events:\n"
         + "\n".join(event_lines)
         + "\n- Signals:\n"
@@ -445,8 +458,28 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     intel_data = ""
     user_focus = "general"
     if intel_mode:
-        intel_context = get_latest_intel(services, user_id=user_id)
-        intel_data = format_intel_for_prompt(intel_context) if intel_context else ""
+        short_query = _normalize_text(text)[:120]
+        intel_context = select_relevant_intel_context(services.intel, text, user_id=user_id, max_events=5)
+        query_focus = intel_context.get("query_focus") or {}
+        logger.info(
+            "QUERY_TOPICS_EXTRACTED query=%s topics=%s",
+            short_query,
+            ",".join([str(t) for t in (query_focus.get("topics") or [])]) or "none",
+        )
+        selected_events = intel_context.get("key_events") or []
+        if selected_events:
+            top_titles = [str(x.get("title") or "")[:48] for x in selected_events[:3]]
+            logger.info(
+                "RELEVANT_INTEL_SELECTED query=%s selected_count=%s top_titles=%s",
+                short_query,
+                len(selected_events),
+                " | ".join(top_titles),
+            )
+            intel_data = format_intel_for_prompt(intel_context, relevant=True)
+        else:
+            logger.info("RELEVANT_INTEL_EMPTY_FALLBACK_GLOBAL query=%s", short_query)
+            intel_context = get_latest_intel(services, user_id=user_id)
+            intel_data = format_intel_for_prompt(intel_context, relevant=False) if intel_context else ""
         user_focus = extract_user_focus(services, session.id, text)
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
     if long_memory_text:
