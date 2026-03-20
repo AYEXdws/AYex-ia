@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from urllib import request as urlrequest
+
 from fastapi import APIRouter, Depends, Request
 
 from backend.src.routes.deps import get_services
@@ -9,6 +12,30 @@ from backend.src.utils.logging import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+
+def get_latest_intel() -> str:
+    endpoint = "http://localhost:8000/intel"
+    try:
+        req = urlrequest.Request(endpoint, headers={"Accept": "application/json"})
+        with urlrequest.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(data, dict):
+            logger.info("INTEL_FETCH_FAIL reason=invalid_payload_type")
+            return ""
+        compact = {
+            "daily_brief": str(data.get("daily_brief") or "").strip(),
+            "insights": data.get("insights") or [],
+            "count": data.get("count", 0),
+        }
+        text = json.dumps(compact, ensure_ascii=False)
+        if len(text) > 1400:
+            text = text[:1400]
+        logger.info("INTEL_FETCH_SUCCESS chars=%s", len(text))
+        return text
+    except Exception as exc:
+        logger.info("INTEL_FETCH_FAIL error=%s", exc)
+        return ""
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -71,6 +98,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     )
     long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
     long_memory_text = long_memory_ctx.as_text()
+    intel_data = get_latest_intel()
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
     if long_memory_text:
         memory_hits += len(long_memory_ctx.conversation_hits) + len(long_memory_ctx.event_hits)
@@ -91,13 +119,25 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     model_input = text
     if tool_context:
         model_input = f"Kullanici sorusu: {text}\n\nTool kaniti:\n{tool_context}"
+    intel_block = intel_data if intel_data else ""
+    intel_system_prompt = (
+        "You are Ayex-IA, a private intelligence system.\n\n"
+        "Use the following real-time intelligence data to answer:\n\n"
+        f"{intel_block}\n\n"
+        "Rules:\n"
+        "- If intel data contains relevant info, use it\n"
+        "- Do not say 'I don't have access to real-time data'\n"
+        "- Be analytical, not generic\n"
+        "- Produce insight, not raw data\n"
+    )
+    profile_context_for_model = f"{services.profile.prompt_context()}\n\n{intel_system_prompt}"
 
     if intent.category == "agent_task":
         agent_res = services.agent_mode.run(
             text=text,
             workspace=payload.workspace,
             model=payload.model,
-            profile_context=services.profile.prompt_context(),
+            profile_context=profile_context_for_model,
             memory_context=merged_memory,
             response_style=style_decision.style,
         )
@@ -108,7 +148,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             workspace=payload.workspace,
             model=payload.model,
             history=history,
-            profile_context=services.profile.prompt_context(),
+            profile_context=profile_context_for_model,
             memory_context=merged_memory,
             response_style=style_decision.style,
             route_name="chat",
