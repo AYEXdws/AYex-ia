@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 
 from backend.src.config.env import BackendSettings, load_settings
 from backend.src.intel.intel_service import IntelService
@@ -77,7 +78,7 @@ def build_services() -> BackendServices:
     long_memory = LongMemoryService(settings)
     long_memory.sync_profile(profile.load())
     agent_mode = AgentModeService(openclaw=openclaw, tools=tools)
-    intel_store = IntelStore()
+    intel_store = IntelStore(persist_path=Path(settings.data_dir) / "intel_events.json")
     intel = IntelService(intel_store, openai_client=openclaw.openai)
     _seed_intel(intel)
     cost_guard = CostGuardService(settings)

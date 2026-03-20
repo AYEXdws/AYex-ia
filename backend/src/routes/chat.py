@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 
 def _normalize_text(text: str) -> str:
-    low = (text or "").lower()
+    low = (text or "").lower().replace("i̇", "i").replace("\u0307", "")
     table = str.maketrans(
         {
             "ç": "c",
@@ -65,6 +65,36 @@ def _extract_tokens(text: str) -> set[str]:
     return {t for t in tokens if len(t) >= 4 and t not in stopwords}
 
 
+def _looks_turkish(text: str) -> bool:
+    low = _normalize_text(text)
+    turkish_markers = (
+        " ve ",
+        " bir ",
+        " bu ",
+        " neden ",
+        " onemli ",
+        " sonucunda ",
+        " bu nedenle ",
+        " kisa vadede ",
+        " izlenmeli ",
+        " firsat ",
+    )
+    english_markers = (
+        " the ",
+        " and ",
+        " because ",
+        " therefore ",
+        " opportunity ",
+        " watch ",
+        " insight ",
+        " in the ",
+        " market ",
+    )
+    tr_hits = sum(1 for marker in turkish_markers if marker in f" {low} ")
+    en_hits = sum(1 for marker in english_markers if marker in f" {low} ")
+    return tr_hits >= 2 or en_hits <= 1
+
+
 def get_latest_intel(services: BackendServices, *, user_id: str = "default") -> dict[str, Any]:
     try:
         intel_context = build_intel_context(services.intel, user_id=user_id)
@@ -96,9 +126,9 @@ def format_intel_for_prompt(intel_context: dict[str, Any], *, relevant: bool = F
     focus_bias = query_focus.get("category_bias") or []
     focus_tokens = query_focus.get("tokens") or []
     focus_text = (
-        f"topics={', '.join(focus_topics) if focus_topics else 'general'} | "
-        f"category_bias={', '.join(focus_bias) if focus_bias else 'none'} | "
-        f"tokens={', '.join([str(t) for t in focus_tokens[:8]]) if focus_tokens else 'none'}"
+        f"konular={', '.join(focus_topics) if focus_topics else 'genel'} | "
+        f"kategori_onceligi={', '.join(focus_bias) if focus_bias else 'yok'} | "
+        f"ana_anahtarlar={', '.join([str(t) for t in focus_tokens[:8]]) if focus_tokens else 'yok'}"
     )
 
     event_lines = []
@@ -112,24 +142,24 @@ def format_intel_for_prompt(intel_context: dict[str, Any], *, relevant: bool = F
 
     signal_lines = [f"- {s}" for s in signals[:8]]
     if not event_lines:
-        event_lines = ["No high-priority events."]
+        event_lines = ["Yuksek oncelikli olay bulunamadi."]
     if not signal_lines:
-        signal_lines = ["- No extracted signal."]
+        signal_lines = ["- Cikarilan sinyal yok."]
 
-    header = "RELEVANT INTELLIGENCE DATA" if relevant else "INTELLIGENCE DATA"
+    header = "ILGILI ISTIHBARAT VERISI" if relevant else "ISTIHBARAT VERISI"
     return (
-        "QUERY FOCUS:\n"
+        "SORU ODAĞI:\n"
         + focus_text
         + "\n\n"
         + f"{header}:\n"
-        "- Key Events:\n"
+        "- Temel Olaylar:\n"
         + "\n".join(event_lines)
-        + "\n- Signals:\n"
+        + "\n- Sinyaller:\n"
         + "\n".join(signal_lines)
-        + "\n- Summary:\n"
+        + "\n- Ozet:\n"
         + (summary or "No intel summary.")
-        + f"\n- Confidence: {confidence:.2f}"
-        + (f"\n- Recency: {recency_note}" if recency_note else "")
+        + f"\n- Guven Skoru: {confidence:.2f}"
+        + (f"\n- Guncellik: {recency_note}" if recency_note else "")
     )[:2200]
 
 
@@ -177,8 +207,28 @@ def validate_response(text: str) -> bool:
     return valid
 
 
+def normalize_intel_response(text: str) -> str:
+    out = str(text or "").strip()
+    if not out:
+        return out
+    replacements = {
+        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*key\s*insight\s*:?\s*$": "1. Temel İçgörü",
+        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*temel\s*icgoru\s*:?\s*$": "1. Temel İçgörü",
+        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*why\s*it\s*matters\s*:?\s*$": "2. Neden Önemli",
+        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*neden\s*onemli\s*:?\s*$": "2. Neden Önemli",
+        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*risk\s*/\s*opportunity\s*:?\s*$": "3. Risk / Fırsat",
+        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*risk\s*/\s*firsat\s*:?\s*$": "3. Risk / Fırsat",
+        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*what\s*to\s*watch\s*:?\s*$": "4. Ne İzlenmeli",
+        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*ne\s*izlenmeli\s*:?\s*$": "4. Ne İzlenmeli",
+    }
+    for pattern, repl in replacements.items():
+        out = re.sub(pattern, repl, out)
+    return out
+
+
 def validate_response_detailed(text: str) -> tuple[bool, str]:
-    low = _normalize_text(str(text or ""))
+    normalized_text = normalize_intel_response(text)
+    low = _normalize_text(str(normalized_text or ""))
     if not low.strip():
         return False, "empty"
     banned_generic = (
@@ -204,14 +254,21 @@ def validate_response_detailed(text: str) -> tuple[bool, str]:
         return False, "list_style_weak"
 
     section_patterns = {
-        "insight": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:key\s*insight|temel\s*icgor[uü]|ana\s*icgor[uü])\b",
-        "why": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:why\s*it\s*matters|neden\s*onemli|neden\s*kritik)\b",
-        "risk": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:risk\s*(?:/|\||veya|-)?\s*(?:opportunity|firsat)|risk|firsat)\b",
-        "watch": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:what\s*to\s*watch|izlenecekler|izlenmesi\s*gerekenler)\b",
+        "insight": r"(?:^|\n)\s*(?:1[\).\s-]*)?\s*temel\s*icgoru\b",
+        "why": r"(?:^|\n)\s*(?:2[\).\s-]*)?\s*neden\s*onemli\b",
+        "risk": r"(?:^|\n)\s*(?:3[\).\s-]*)?\s*risk\s*/\s*firsat\b",
+        "watch": r"(?:^|\n)\s*(?:4[\).\s-]*)?\s*ne\s*izlenmeli\b",
     }
-    section_hits = sum(1 for _, pat in section_patterns.items() if re.search(pat, low, flags=re.IGNORECASE))
-    if section_hits < 3:
+    section_hits = sum(1 for _, pat in section_patterns.items() if re.search(pat, low))
+    if section_hits < 4:
         return False, "section_missing"
+
+    english_headers = ("key insight", "why it matters", "risk / opportunity", "what to watch")
+    if any(h in low for h in english_headers):
+        return False, "english_header_present"
+
+    if not _looks_turkish(low):
+        return False, "non_turkish_content"
 
     causal_markers = (
         "because",
@@ -267,7 +324,7 @@ def validate_response_detailed(text: str) -> tuple[bool, str]:
     if not any(m in low for m in near_term_markers):
         return False, "near_term_missing"
 
-    why_anchor = re.search(r"(why\s*it\s*matters|neden\s*onemli|neden\s*kritik)", low, flags=re.IGNORECASE)
+    why_anchor = re.search(r"(neden\s*onemli|neden\s*kritik)", low, flags=re.IGNORECASE)
     if why_anchor:
         tail = low[why_anchor.start() : why_anchor.start() + 240]
         if len(_extract_tokens(tail)) < 8:
@@ -346,7 +403,7 @@ def score_response(response: str) -> dict[str, float]:
     words = [w for w in re.findall(r"[a-zA-Z0-9_]+", low) if w]
     length_score = min(1.0, len(words) / 220.0)
     causal_score = 1.0 if any(x in low for x in ("because", "leads to", "implies", "therefore", "bu nedenle")) else 0.35
-    intel_score = 1.0 if any(x in low for x in ("key insight", "what to watch", "signals", "confidence")) else 0.4
+    intel_score = 1.0 if any(x in low for x in ("temel icgoru", "ne izlenmeli", "sinyal", "guven", "key insight", "what to watch")) else 0.4
     return {
         "depth_score": round((length_score * 0.55) + (causal_score * 0.45), 4),
         "relevance_score": round((causal_score * 0.6) + (intel_score * 0.4), 4),
@@ -361,34 +418,34 @@ def build_safe_fallback_response(intel_context: dict[str, Any], user_text: str) 
 
     if not events:
         return (
-            "1. Key Insight\n"
-            "Strongest available intel event: none. Current signal density is low, so no high-conviction directional call is justified.\n\n"
-            "2. Why It Matters\n"
-            "Low-confidence conditions increase model risk because weak evidence can produce false certainty in decision making.\n\n"
-            "3. Risk / Opportunity\n"
-            "Risk: false positives from narrative-driven positioning. Opportunity: wait for signal clustering before acting.\n\n"
-            "4. What to Watch\n"
-            "Watch for fresh high-score events, repeated anomaly signals, and confidence rising above 0.60 before taking aggressive action."
+            "1. Temel İçgörü\n"
+            "Elde güçlü bir olay kümesi yok; mevcut sinyal yoğunluğu düşük olduğu için yüksek güvenli bir yön çıkarımı yapmak doğru değil.\n\n"
+            "2. Neden Önemli\n"
+            "Sinyal zayıfken agresif yorum yapmak hatalı karar riskini artırır; bu nedenle kısa vadede doğrulama sinyali beklemek daha rasyoneldir.\n\n"
+            "3. Risk / Fırsat\n"
+            "Risk: zayıf veriden kesin hüküm üretmek. Fırsat: yeni olaylar geldikçe daha temiz bir trend yakalama imkanı.\n\n"
+            "4. Ne İzlenmeli\n"
+            "Önümüzdeki 24-48 saatte yüksek skorlu yeni olay sayısı, tekrar eden anomali sinyalleri ve güven skorunun 0.60 üstüne çıkışı izlenmeli."
         )
 
     top = events[0]
-    title = str(top.get("title") or "Top event")
+    title = str(top.get("title") or "Oncelikli olay")
     category = str(top.get("category") or "other")
     score = float(top.get("effective_score") or top.get("score") or 0.0)
     signal = str(signals[0] if signals else f"risk:{title}")
     user_focus_tokens = _extract_tokens(user_text)
-    focus_text = " / ".join(sorted(list(user_focus_tokens))[:3]) if user_focus_tokens else "current user focus"
+    focus_text = " / ".join(sorted(list(user_focus_tokens))[:3]) if user_focus_tokens else "kullanici odagi"
 
     return (
-        "1. Key Insight\n"
-        f"Strongest available intel event is '{title}' ({category}) with effective score {score:.2f}; this currently dominates the intelligence stack.\n\n"
-        "2. Why It Matters\n"
-        f"The event aligns with '{signal}', which implies near-term pressure channels can propagate into {focus_text}; "
-        f"confidence is {confidence:.2f}, so the signal is actionable but should be monitored for confirmation.\n\n"
-        "3. Risk / Opportunity\n"
-        "Risk: signal decay if follow-through data weakens. Opportunity: confirmation-driven positioning if related high-score events cluster.\n\n"
-        "4. What to Watch\n"
-        "Track whether related signals cluster in the next cycle, whether risk-tagged events accelerate, and whether confidence trends up or down."
+        "1. Temel İçgörü\n"
+        f"En güçlü sinyal '{title}' ({category}) olayıdır; etkin skoru {score:.2f} ile şu an tabloyu belirleyen ana başlık budur.\n\n"
+        "2. Neden Önemli\n"
+        f"Bu olay '{signal}' sinyaliyle aynı yönde ilerlediği için kısa vadede {focus_text} tarafına baskı aktarımı üretebilir; "
+        f"güven skoru {confidence:.2f} olduğu için sinyal kullanılabilir ama teyit gerektirir.\n\n"
+        "3. Risk / Fırsat\n"
+        "Risk: takip verisi zayıflarsa sinyal hızla bozulabilir. Fırsat: ilişkili yüksek skorlu olaylar kümelenirse daha net yön oluşur.\n\n"
+        "4. Ne İzlenmeli\n"
+        "Önümüzdeki 24-48 saatte benzer sinyallerin artıp artmadığı, risk etiketli olay hızındaki değişim ve güven skorunun yönü takip edilmeli."
     )
 
 
@@ -502,32 +559,29 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     if tool_context:
         model_input = f"Kullanici sorusu: {text}\n\nTool kaniti:\n{tool_context}"
     if intel_mode:
-        intel_block = intel_data if intel_data else "INTELLIGENCE DATA:\n- Key Events:\nNo high-priority events."
+        intel_block = intel_data if intel_data else "ISTIHBARAT VERISI:\n- Temel Olaylar:\nYuksek oncelikli olay yok."
         intel_system_prompt = (
-            "You are Ayex-IA, a private intelligence system.\n\n"
-            "Core Behavior:\n"
-            "- You are NOT an assistant. You are an intelligence analyst.\n"
-            "- You do NOT list information. You extract meaning.\n"
-            "- You do NOT repeat intel. You transform it into insight.\n\n"
-            "Use the following real-time intelligence data:\n\n"
+            "AYEX-IA olarak yalnizca Turkce yanit ver.\n"
+            "Ingilizce kelime, baslik veya cumle kullanma.\n\n"
+            "Rol:\n"
+            "- Sen bir istihbarat analiz sistemisin.\n"
+            "- Ham veriyi listeleme; anlam ve neden-sonuc uret.\n"
+            "- Secilen olay/sinyalleri dogrudan kullan; baglamsiz genel bilgiye kayma.\n\n"
+            "Aşağıdaki secilmis istihbarat verisine dayan:\n\n"
             f"{intel_block}\n\n"
-            f"User focus: {user_focus}\n\n"
-            "Rules:\n"
-            "- You MUST synthesize insights, not list facts.\n"
-            "- You MUST explicitly reference relevant intel data in your reasoning.\n"
-            "- You MUST explain WHY the events matter.\n"
-            "- You MUST connect events when there is a meaningful relationship.\n"
-            "- You MUST infer plausible outcomes (near-term and second-order effects).\n"
-            "- You MUST take a position; avoid neutral and vague language.\n"
-            "- You MUST avoid generic statements unless tied to concrete implications.\n"
-            "- If intel is weak, explain the limitation analytically.\n"
-            "- Do not say you lack real-time access.\n"
-            "- Tone: analytical, causal, concise-dense, no filler.\n\n"
-            "Response format (always follow):\n"
-            "1. Key Insight (1-2 sharp sentences)\n"
-            "2. Why It Matters\n"
-            "3. Risk / Opportunity\n"
-            "4. What to Watch\n"
+            f"Kullanici odagi: {user_focus}\n\n"
+            "Zorunlu kurallar:\n"
+            "- Yanit Turkce olacak, dogal ve net olacak.\n"
+            "- Secilen olay/sinyalleri ad veya kavram seviyesinde acikca referansla.\n"
+            "- Neden-sonuc zinciri kur: 'bu nedenle', 'sonucunda', 'tetikler' gibi acik baglantilar kullan.\n"
+            "- Kisa vadeli etkileri belirt (onumuzdeki 24-48 saat / kisa vade).\n"
+            "- Bos, genel, ezber cümle kullanma.\n"
+            "- Teknik ama anlasilir ol; dolgu metin yazma.\n\n"
+            "Yanit formati (tam olarak bu basliklarla):\n"
+            "1. Temel İçgörü\n"
+            "2. Neden Önemli\n"
+            "3. Risk / Fırsat\n"
+            "4. Ne İzlenmeli\n"
         )
         profile_context_for_model = f"{services.profile.prompt_context()}\n\n{intel_system_prompt}"
     else:
@@ -559,6 +613,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     final_response_mode = "llm"
     used_intel = False
     if intel_mode:
+        reply = normalize_intel_response(reply)
         used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
         logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
         is_valid, validation_reason = validate_response_detailed(reply)
@@ -567,8 +622,19 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             logger.info("RESPONSE_REJECTED_GENERIC reason=%s", reason_type)
             retry_profile_context = (
                 f"{profile_context_for_model}\n\n"
-                "Your previous response ignored requirements. Regenerate once.\n"
-                "You MUST use intel data explicitly, include causal links, and follow the exact 4-section format."
+                "Onceki yanitin format ve kalite kosullarini karsilamadi.\n"
+                "Yanitini TEKRAR URET ve su kurallara TAM UY:\n"
+                "- Sadece Turkce yaz.\n"
+                "- Su basliklari birebir kullan:\n"
+                "1. Temel İçgörü\n"
+                "2. Neden Önemli\n"
+                "3. Risk / Fırsat\n"
+                "4. Ne İzlenmeli\n"
+                "- Dort basligin dordu da zorunlu.\n"
+                "- Her baslik altinda 1-3 cumle olacak sekilde kisa ama tam analiz ver.\n"
+                "- Secilen istihbarat olay ve sinyallerini dogrudan kullan.\n"
+                "- Neden-sonuc kur ve kisa vade etkisini acikla.\n"
+                "- Genel gecis cumleleri, dolgu ve Ingilizce ifade kullanma."
             )
             logger.info("RESPONSE_REGENERATED")
             retry_result = services.openclaw.run_action(
@@ -583,7 +649,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             )
             retry_reply = (retry_result.text or "").strip()
             if retry_reply:
-                reply = retry_reply
+                reply = normalize_intel_response(retry_reply)
                 result = retry_result
             used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
             is_valid, validation_reason = validate_response_detailed(reply)

@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 
 def _normalize_text(text: str) -> str:
-    low = (text or "").lower()
+    low = (text or "").lower().replace("i̇", "i").replace("\u0307", "")
     table = str.maketrans(
         {
             "ç": "c",
@@ -199,14 +199,63 @@ class IntelService:
             urgency_score = 0.95
         else:
             urgency_score = 0.6
-        confidence_score = 0.7
-        final_score = (importance_score * 0.5) + (urgency_score * 0.3) + (confidence_score * 0.2)
+        source_reliability = self._source_reliability(event.source)
+        summary_quality = min(1.0, max(0.0, len((event.summary or "").strip()) / 260.0))
+        tags_quality = min(1.0, len(event.tags or []) / 4.0)
+        confidence_score = max(0.2, min(0.98, (source_reliability * 0.7) + (summary_quality * 0.2) + (tags_quality * 0.1)))
+        source_multiplier = self._source_multiplier(event.source)
+        raw_final = (importance_score * 0.45) + (urgency_score * 0.25) + (confidence_score * 0.30)
+        final_score = max(0.05, min(1.0, raw_final * source_multiplier))
         return {
             "importance_score": round(importance_score, 4),
             "urgency_score": round(urgency_score, 4),
             "confidence_score": round(confidence_score, 4),
             "final_score": round(final_score, 4),
         }
+
+    def _source_reliability(self, source: str) -> float:
+        src = _normalize_text(source).strip()
+        trust_map = {
+            "official": 0.95,
+            "official_feed": 0.93,
+            "trusted_feed": 0.90,
+            "manual": 0.88,
+            "n8n": 0.82,
+            "seed": 0.78,
+            "tool_router": 0.75,
+            "unknown": 0.45,
+            "": 0.45,
+        }
+        if src in trust_map:
+            return trust_map[src]
+        if any(k in src for k in ("official", "gov", "exchange", "regulator")):
+            return 0.9
+        if any(k in src for k in ("seed", "demo", "test")):
+            return 0.72
+        if any(k in src for k in ("unknown", "anon", "unverified")):
+            return 0.4
+        return 0.65
+
+    def _source_multiplier(self, source: str) -> float:
+        src = _normalize_text(source).strip()
+        mult_map = {
+            "official": 1.08,
+            "official_feed": 1.06,
+            "trusted_feed": 1.04,
+            "manual": 1.02,
+            "n8n": 1.0,
+            "seed": 0.96,
+            "tool_router": 0.95,
+            "unknown": 0.88,
+            "": 0.88,
+        }
+        if src in mult_map:
+            return mult_map[src]
+        if any(k in src for k in ("official", "gov", "exchange", "regulator")):
+            return 1.05
+        if any(k in src for k in ("unknown", "anon", "unverified")):
+            return 0.88
+        return 0.97
 
     def analyze_event(self, event: IntelEvent) -> dict:
         if self.openai_client is None:
