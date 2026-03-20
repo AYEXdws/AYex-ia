@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from backend.src.intel.intel_service import build_intel_context, get_intel_summary
+from backend.src.intel.intel_service import build_intel_context, select_relevant_intel_context, summarize_intel_context
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
@@ -182,6 +182,22 @@ def extract_user_focus(services: BackendServices, session_id: str, current_text:
 
 def is_intel_query(text: str) -> bool:
     low = _normalize_text(text)
+    words = [w for w in re.findall(r"[a-z0-9]+", low) if w]
+    smalltalk_terms = {
+        "selam",
+        "merhaba",
+        "naber",
+        "nasilsin",
+        "iyiyim",
+        "tesekkurler",
+        "tesekkur",
+        "saol",
+        "gunaydin",
+        "iyiaksamlar",
+    }
+    if len(words) <= 5 and any(w in smalltalk_terms for w in words):
+        return False
+
     keyword_groups = (
         ("market", "crypto", "kripto", "btc", "eth", "altcoin", "finance", "finans", "fed", "faiz", "enflasyon"),
         ("security", "guvenlik", "breach", "hack", "sizinti", "ihlal", "exploit", "ransomware"),
@@ -197,6 +213,11 @@ def is_intel_query(text: str) -> bool:
         r"\banaliz\b",
         r"\bdegerlendir\b",
         r"\bimpact\b",
+        r"\bhaber\b",
+        r"\bguncel\b",
+        r"\bson durum\b",
+        r"\bneden dustu\b",
+        r"\bneden yukseldi\b",
         r"\bris(k|k)\b",
     )
     return any(re.search(p, low) for p in analysis_patterns)
@@ -297,6 +318,9 @@ def validate_response_detailed(text: str) -> tuple[bool, str]:
     low = _normalize_text(str(normalized_text or ""))
     if not low.strip():
         return False, "empty"
+    words = [w for w in re.findall(r"[a-z0-9_]+", low) if w]
+    if len(words) < 22:
+        return False, "too_short"
     banned_generic = (
         "generally",
         "in general",
@@ -308,7 +332,7 @@ def validate_response_detailed(text: str) -> tuple[bool, str]:
         "piyasa dalgali",
         "belirsizlik var",
     )
-    if any(p in low for p in banned_generic):
+    if len(words) < 120 and any(p in low for p in banned_generic):
         return False, "generic_phrase"
 
     lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
@@ -316,25 +340,12 @@ def validate_response_detailed(text: str) -> tuple[bool, str]:
     for line in lines:
         if re.match(r"^[-*•]\s+", line) or re.match(r"^\d+[\).\s-]+", line):
             list_like += 1
-    if lines and (list_like / max(1, len(lines))) > 0.6:
+    if lines and (list_like / max(1, len(lines))) > 0.92 and len(words) < 45:
         return False, "list_style_weak"
 
-    section_patterns = {
-        "insight": r"(?:^|\n)\s*(?:1[\).\s-]*)?\s*temel\s*icgoru\b",
-        "why": r"(?:^|\n)\s*(?:2[\).\s-]*)?\s*neden\s*onemli\b",
-        "risk": r"(?:^|\n)\s*(?:3[\).\s-]*)?\s*risk\s*/\s*firsat\b",
-        "watch": r"(?:^|\n)\s*(?:4[\).\s-]*)?\s*ne\s*izlenmeli\b",
-    }
-    section_hits = sum(1 for _, pat in section_patterns.items() if re.search(pat, low))
-    if section_hits < 4:
-        return False, "section_missing"
-
-    english_headers = ("key insight", "why it matters", "risk / opportunity", "what to watch")
-    if any(h in low for h in english_headers):
-        return False, "english_header_present"
-
     if not _looks_turkish(low):
-        return False, "non_turkish_content"
+        if len(words) < 50:
+            return False, "non_turkish_content"
 
     causal_markers = (
         "because",
@@ -347,54 +358,19 @@ def validate_response_detailed(text: str) -> tuple[bool, str]:
         "sonucunda",
         "neden olur",
     )
-    if not any(m in low for m in causal_markers):
-        return False, "causal_missing"
-
-    mechanism_terms = (
-        "because",
-        "therefore",
-        "implies",
-        "leads to",
-        "transmission",
-        "liquidity",
-        "funding",
-        "spread",
-        "rotation",
-        "risk-off",
-        "risk on",
+    analytic_markers = (
         "bu nedenle",
         "sonucunda",
-        "kanaliyla",
-        "tetikleyerek",
-        "mekanizma",
-    )
-    if not any(t in low for t in mechanism_terms):
-        return False, "mechanism_missing"
-
-    if ("volatility" in low or "oynaklik" in low or "regulation" in low or "duzenleme" in low) and not any(
-        t in low for t in ("because", "bu nedenle", "sonucunda", "leads to", "implies")
-    ):
-        return False, "generic_topic_without_mechanism"
-
-    near_term_markers = (
-        "near-term",
-        "next 24h",
-        "next 48h",
-        "next session",
-        "short-term",
+        "tetikler",
+        "baski",
+        "etki",
+        "risk",
+        "firsat",
+        "izlenmeli",
         "kisa vade",
-        "kisa vadede",
-        "onumuzdeki 24 saat",
-        "onumuzdeki 48 saat",
     )
-    if not any(m in low for m in near_term_markers):
-        return False, "near_term_missing"
-
-    why_anchor = re.search(r"(neden\s*onemli|neden\s*kritik)", low, flags=re.IGNORECASE)
-    if why_anchor:
-        tail = low[why_anchor.start() : why_anchor.start() + 240]
-        if len(_extract_tokens(tail)) < 8:
-            return False, "why_section_weak"
+    if len(words) < 45 and not any(m in low for m in (*causal_markers, *analytic_markers)):
+        return False, "low_information"
 
     return True, "ok"
 
@@ -459,6 +435,12 @@ def did_use_intel_detailed(response: str, intel_context: dict[str, Any]) -> tupl
         return True, "title_overlap"
     if signal_hit >= 1 and concept_overlap >= 2:
         return True, "signal_overlap"
+    if summary_overlap >= 2 and concept_overlap >= 3:
+        return True, "summary_overlap"
+    if category_hit >= 1 and concept_overlap >= 2:
+        return True, "category_overlap"
+    if concept_overlap >= 4 and (summary_overlap >= 1 or title_hit >= 1):
+        return True, "concept_overlap"
     if category_hit >= 1 and summary_overlap >= 1 and concept_overlap >= 3:
         return True, "category_summary_overlap"
     return False, "insufficient_intel_reference"
@@ -589,8 +571,28 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     long_memory_text = long_memory_ctx.as_text()
     latest_events = services.intel.get_latest_events(limit=10)
     logger.info("CHAT_LATEST_EVENTS count=%s", len(latest_events))
-    intel_mode = len(latest_events) > 0
-    mode_reason = "events_available" if intel_mode else "no_events"
+    intel_query = is_intel_query(text)
+    relevant_intel_context: dict[str, Any] = {}
+    if intel_query:
+        try:
+            relevant_intel_context = select_relevant_intel_context(
+                services.intel,
+                query=text,
+                user_id=user_id,
+                max_events=5,
+            )
+        except Exception as exc:
+            logger.info("CHAT_INTEL_SELECT_ERROR error=%s", exc)
+            relevant_intel_context = {}
+    relevant_events = relevant_intel_context.get("key_events") or []
+    intel_mode = bool(intel_query and relevant_events)
+    if not intel_query:
+        mode_reason = "query_not_intel"
+    elif not relevant_events:
+        mode_reason = "no_relevant_events"
+        logger.info("CHAT_INTEL_SELECTED count=0 titles=none")
+    else:
+        mode_reason = "relevant_events"
     logger.info("CHAT_INTEL_MODE enabled=%s reason=%s", intel_mode, mode_reason)
     logger.info("INTEL_MODE=%s reason=%s", "on" if intel_mode else "off", mode_reason)
     intel_context: dict[str, Any] = {}
@@ -598,8 +600,8 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     user_focus = "general"
     injected_event_count = 0
     if intel_mode:
-        intel_context = _build_intel_context_from_events(latest_events)
-        compact_intel = get_intel_summary(services.intel, user_id=user_id, max_chars=1000)
+        intel_context = relevant_intel_context
+        compact_intel = summarize_intel_context(intel_context, max_chars=1000)
         selected_events = intel_context.get("key_events") or []
         injected_event_count = len(selected_events)
         selected_titles = [str(item.get("title") or "").strip() for item in selected_events if str(item.get("title") or "").strip()]
@@ -652,11 +654,11 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             "- Kisa vadeli etkileri belirt (onumuzdeki 24-48 saat / kisa vade).\n"
             "- Bos, genel, ezber cümle kullanma.\n"
             "- Teknik ama anlasilir ol; dolgu metin yazma.\n\n"
-            "Yanit formati (tam olarak bu basliklarla):\n"
-            "1. Temel İçgörü\n"
-            "2. Neden Önemli\n"
-            "3. Risk / Fırsat\n"
-            "4. Ne İzlenmeli\n"
+            "Yanit yapisi (basliklar opsiyonel, ancak bu 4 boyutu kapsa):\n"
+            "- Temel İçgörü\n"
+            "- Neden Önemli\n"
+            "- Risk / Fırsat\n"
+            "- Ne İzlenmeli\n"
         )
         profile_context_for_model = f"{services.profile.prompt_context()}\n\n{intel_system_prompt}"
     else:
@@ -690,6 +692,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     fallback_used_intel = False
     used_intel = False
     if intel_mode:
+        hard_fail_reasons = {"empty", "too_short", "generic_phrase", "low_information"}
         reply = normalize_intel_response(reply)
         model_used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
         if model_used_intel and injected_event_count > 0:
@@ -697,31 +700,29 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         else:
             logger.info("INTEL_USED_FALSE reason=%s", intel_reason)
         is_valid, validation_reason = validate_response_detailed(reply)
+        hard_validation_fail = (not is_valid) and (validation_reason in hard_fail_reasons)
+        needs_retry = (not model_used_intel and injected_event_count > 0) or hard_validation_fail
         logger.info(
-            "CHAT_VALIDATION stage=initial passed=%s intel_used=%s reason=%s",
-            is_valid and model_used_intel,
+            "CHAT_VALIDATION stage=initial passed=%s intel_used=%s reason=%s hard_fail=%s retry=%s",
+            is_valid,
             model_used_intel,
-            "ok" if is_valid and model_used_intel else ("intel_missing" if not model_used_intel else validation_reason),
+            "ok" if is_valid else validation_reason,
+            hard_validation_fail,
+            needs_retry,
         )
-        if not is_valid or not model_used_intel:
-            reason_type = "intel_missing" if not model_used_intel else validation_reason
+        if needs_retry:
+            reason_type = "intel_missing" if not model_used_intel and injected_event_count > 0 else validation_reason
             logger.info("CHAT_REJECT stage=initial reason=%s", reason_type)
             logger.info("RESPONSE_REJECTED_GENERIC reason=%s", reason_type)
             retry_profile_context = (
                 f"{profile_context_for_model}\n\n"
-                "Onceki yanitin format ve kalite kosullarini karsilamadi.\n"
-                "Yanitini TEKRAR URET ve su kurallara TAM UY:\n"
+                "Onceki yanit yeterli netlikte degil veya secili intel ile yeterince baglantili degil.\n"
+                "Yanitini TEKRAR URET ve su kosullari karsila:\n"
                 "- Sadece Turkce yaz.\n"
-                "- Su basliklari birebir kullan:\n"
-                "1. Temel İçgörü\n"
-                "2. Neden Önemli\n"
-                "3. Risk / Fırsat\n"
-                "4. Ne İzlenmeli\n"
-                "- Dort basligin dordu da zorunlu.\n"
-                "- Her baslik altinda 1-3 cumle olacak sekilde kisa ama tam analiz ver.\n"
                 "- Secilen istihbarat olay ve sinyallerini dogrudan kullan.\n"
-                "- Neden-sonuc kur ve kisa vade etkisini acikla.\n"
-                "- Genel gecis cumleleri, dolgu ve Ingilizce ifade kullanma."
+                "- En az bir olay basligini acikca referansla.\n"
+                "- Neden-sonuc iliskisini ve kisa vade etkisini belirt.\n"
+                "- Gereksiz dolgu kullanma, ama formati dogal tut."
             )
             logger.info("CHAT_REGEN triggered=true")
             logger.info("RESPONSE_REGENERATED")
@@ -741,19 +742,23 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
                 result = retry_result
             model_used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
             is_valid, validation_reason = validate_response_detailed(reply)
+            hard_validation_fail = (not is_valid) and (validation_reason in hard_fail_reasons)
+            needs_fallback = (not model_used_intel and injected_event_count > 0) or hard_validation_fail
             if model_used_intel and injected_event_count > 0:
                 logger.info("INTEL_USED_TRUE reason=model")
             else:
                 logger.info("INTEL_USED_FALSE reason=%s", intel_reason)
             logger.info(
-                "CHAT_VALIDATION stage=regen passed=%s intel_used=%s reason=%s",
-                is_valid and model_used_intel,
+                "CHAT_VALIDATION stage=regen passed=%s intel_used=%s reason=%s hard_fail=%s fallback=%s",
+                is_valid,
                 model_used_intel,
-                "ok" if is_valid and model_used_intel else (validation_reason if not is_valid else intel_reason),
+                "ok" if is_valid else validation_reason,
+                hard_validation_fail,
+                needs_fallback,
             )
-            if is_valid and model_used_intel:
+            if not needs_fallback:
                 final_response_mode = "regen"
-            if not is_valid or not model_used_intel:
+            if needs_fallback:
                 logger.info("REGEN_VALIDATION_FAILED reason=%s", validation_reason if not is_valid else intel_reason)
                 logger.info("RESPONSE_REJECTED_AFTER_REGEN reason=%s", validation_reason if not is_valid else intel_reason)
                 reply = build_safe_fallback_response(intel_context, text)

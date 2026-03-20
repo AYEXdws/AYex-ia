@@ -28,7 +28,25 @@ def _normalize_text(text: str) -> str:
 
 
 def _tokenize(text: str) -> set[str]:
-    return {t for t in re.findall(r"[a-z0-9_]{3,}", _normalize_text(text)) if len(t) >= 4}
+    stopwords = {
+        "neden",
+        "durum",
+        "nasil",
+        "hangi",
+        "neydi",
+        "oluyor",
+        "son",
+        "guncel",
+        "nedir",
+        "what",
+        "when",
+        "where",
+    }
+    return {
+        t
+        for t in re.findall(r"[a-z0-9_]{3,}", _normalize_text(text))
+        if len(t) >= 4 and t not in stopwords
+    }
 
 
 def _freshness_for_timestamp(ts: datetime) -> tuple[float, str, float]:
@@ -107,6 +125,32 @@ def _event_topic_hits(event: IntelEvent, query_topics: list[str]) -> float:
         if any(k in blob_norm for k in kws):
             hits += 1
     return min(1.0, hits / max(1, len(query_topics)))
+
+
+def _is_noise_event(event: IntelEvent) -> bool:
+    source_norm = _normalize_text(str(event.source or ""))
+    if source_norm in {"test", "demo", "synthetic"}:
+        return True
+    blob = _normalize_text(
+        " ".join(
+            [
+                str(event.title or ""),
+                str(event.summary or ""),
+                " ".join([str(t) for t in (event.tags or [])]),
+                str(event.source or ""),
+            ]
+        )
+    )
+    markers = (
+        " test event ",
+        " event sample ",
+        " sample payload ",
+        " dummy ",
+        " synthetic ",
+        " auth fix ",
+    )
+    padded = f" {blob} "
+    return any(m in padded for m in markers)
 
 
 class IntelService:
@@ -539,6 +583,8 @@ def select_relevant_intel_context(
     ranked: list[tuple[float, float, float, float, str, IntelEvent]] = []
 
     for event in filtered:
+        if _is_noise_event(event):
+            continue
         title_tokens = _tokenize(event.title)
         summary_tokens = _tokenize(event.summary)
         tag_tokens = _tokenize(" ".join([str(t) for t in (event.tags or [])]))
@@ -555,6 +601,12 @@ def select_relevant_intel_context(
         topic_hit = _event_topic_hits(event, query_topics)
         category_bias_boost = 0.15 if query_categories and _normalize_text(event.category) in query_categories else 0.0
         query_match_score = min(1.0, (overlap_norm * 0.72) + (topic_hit * 0.28) + category_bias_boost)
+
+        event_cat = _normalize_text(event.category)
+        if query_categories and event_cat not in query_categories and topic_hit <= 0.0 and overlap_raw <= 0.0:
+            continue
+        if query_tokens and query_match_score < 0.08:
+            continue
 
         freshness_multiplier, time_window, freshness_bonus = _freshness_for_timestamp(event.timestamp)
         effective_relevance_score = (query_match_score * 0.60) + (float(event.final_score) * 0.25) + (freshness_bonus * 0.15)
@@ -647,3 +699,25 @@ def select_relevant_intel_context(
         "recency_note": f"dominant_time_window={dominant_time_window}",
         "query_focus": query_info,
     }
+
+
+def summarize_intel_context(intel_context: dict, *, max_chars: int = 1000) -> str:
+    key_events = intel_context.get("key_events") or []
+    compact = {
+        "summary": str(intel_context.get("summary") or "").strip(),
+        "signals": intel_context.get("signals") or [],
+        "confidence": float(intel_context.get("confidence") or 0.0),
+        "recency_note": str(intel_context.get("recency_note") or "").strip(),
+        "events": [
+            {
+                "title": str(item.get("title") or "").strip(),
+                "category": str(item.get("category") or "").strip(),
+                "score": float(item.get("effective_score") or item.get("score") or 0.0),
+            }
+            for item in key_events[:5]
+        ],
+    }
+    text = json.dumps(compact, ensure_ascii=False)
+    if len(text) > max_chars:
+        text = text[:max_chars]
+    return text

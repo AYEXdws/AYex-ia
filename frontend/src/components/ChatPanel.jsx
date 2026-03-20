@@ -11,6 +11,7 @@ export default function ChatPanel({ token, onStatus }) {
   ]);
   const [text, setText] = useState('');
   const [typing, setTyping] = useState(false);
+  const sessionIdRef = useRef('');
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -36,7 +37,10 @@ export default function ChatPanel({ token, onStatus }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ text: payloadText })
+        body: JSON.stringify({
+          text: payloadText,
+          session_id: sessionIdRef.current || undefined
+        })
       });
 
       const data = await res.json();
@@ -44,6 +48,9 @@ export default function ChatPanel({ token, onStatus }) {
 
       if (!res.ok) {
         throw new Error(data?.detail || 'Request failed');
+      }
+      if (typeof data?.session_id === 'string' && data.session_id.trim()) {
+        sessionIdRef.current = data.session_id.trim();
       }
 
       const metrics = data?.metrics || {};
