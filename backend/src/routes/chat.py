@@ -526,6 +526,12 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             session_id=payload.session_id or "",
             metrics={"ok": False, "intel_used": False, "intel_event_count": 0},
         )
+    logger.info(
+        "CHAT_INCOMING user_id=%s session_id_hint=%s text_chars=%s",
+        user_id,
+        str(payload.session_id or ""),
+        len(text),
+    )
 
     guard = services.cost_guard.check_and_track(text)
     if not guard.ok:
@@ -582,8 +588,10 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
     long_memory_text = long_memory_ctx.as_text()
     latest_events = services.intel.get_latest_events(limit=10)
+    logger.info("CHAT_LATEST_EVENTS count=%s", len(latest_events))
     intel_mode = len(latest_events) > 0
     mode_reason = "events_available" if intel_mode else "no_events"
+    logger.info("CHAT_INTEL_MODE enabled=%s reason=%s", intel_mode, mode_reason)
     logger.info("INTEL_MODE=%s reason=%s", "on" if intel_mode else "off", mode_reason)
     intel_context: dict[str, Any] = {}
     intel_data = ""
@@ -594,6 +602,12 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         compact_intel = get_intel_summary(services.intel, user_id=user_id, max_chars=1000)
         selected_events = intel_context.get("key_events") or []
         injected_event_count = len(selected_events)
+        selected_titles = [str(item.get("title") or "").strip() for item in selected_events if str(item.get("title") or "").strip()]
+        logger.info(
+            "CHAT_INTEL_SELECTED count=%s titles=%s",
+            injected_event_count,
+            " | ".join(selected_titles[:5]) if selected_titles else "none",
+        )
         logger.info("INTEL_FETCH_SUCCESS count=%s", injected_event_count)
         intel_data = _build_intel_injection_text(intel_context, compact_intel, max_chars=2000)
         logger.info("INTEL_INJECTED count=%s chars=%s", injected_event_count, len(intel_data))
@@ -683,8 +697,15 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         else:
             logger.info("INTEL_USED_FALSE reason=%s", intel_reason)
         is_valid, validation_reason = validate_response_detailed(reply)
+        logger.info(
+            "CHAT_VALIDATION stage=initial passed=%s intel_used=%s reason=%s",
+            is_valid and model_used_intel,
+            model_used_intel,
+            "ok" if is_valid and model_used_intel else ("intel_missing" if not model_used_intel else validation_reason),
+        )
         if not is_valid or not model_used_intel:
             reason_type = "intel_missing" if not model_used_intel else validation_reason
+            logger.info("CHAT_REJECT stage=initial reason=%s", reason_type)
             logger.info("RESPONSE_REJECTED_GENERIC reason=%s", reason_type)
             retry_profile_context = (
                 f"{profile_context_for_model}\n\n"
@@ -702,6 +723,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
                 "- Neden-sonuc kur ve kisa vade etkisini acikla.\n"
                 "- Genel gecis cumleleri, dolgu ve Ingilizce ifade kullanma."
             )
+            logger.info("CHAT_REGEN triggered=true")
             logger.info("RESPONSE_REGENERATED")
             retry_result = services.openclaw.run_action(
                 model_input,
@@ -723,6 +745,12 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
                 logger.info("INTEL_USED_TRUE reason=model")
             else:
                 logger.info("INTEL_USED_FALSE reason=%s", intel_reason)
+            logger.info(
+                "CHAT_VALIDATION stage=regen passed=%s intel_used=%s reason=%s",
+                is_valid and model_used_intel,
+                model_used_intel,
+                "ok" if is_valid and model_used_intel else (validation_reason if not is_valid else intel_reason),
+            )
             if is_valid and model_used_intel:
                 final_response_mode = "regen"
             if not is_valid or not model_used_intel:
@@ -732,9 +760,12 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
                 if injected_event_count > 0:
                     fallback_used_intel = True
                     logger.info("INTEL_USED_TRUE reason=fallback")
+                logger.info("CHAT_FALLBACK used=true")
                 logger.info("SAFE_FALLBACK_USED")
                 final_response_mode = "fallback"
         used_intel = bool(injected_event_count > 0 and (model_used_intel or fallback_used_intel))
+        if final_response_mode != "fallback":
+            logger.info("CHAT_FALLBACK used=false")
     logger.info("FINAL_RESPONSE_MODE=%s", final_response_mode)
     response_scores = score_response(reply)
 
