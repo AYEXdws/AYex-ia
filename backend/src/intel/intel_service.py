@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 from backend.src.intel.event_model import IntelEvent
@@ -281,3 +282,74 @@ def get_intel_summary(service: IntelService, *, user_id: str = "default", max_ch
     if len(text) > max_chars:
         text = text[:max_chars]
     return text
+
+
+def build_intel_context(service: IntelService, user_id: str, *, max_events: int = 5) -> dict:
+    events = service.store.get_all_events()
+    scored = sorted(events, key=lambda e: float(e.final_score), reverse=True)
+    filtered = service.filter_by_user_profile(scored, user_id=user_id)
+
+    seen_titles: set[str] = set()
+    key_events: list[dict] = []
+    for event in filtered:
+        normalized = re.sub(r"\s+", " ", str(event.title or "").strip().lower())
+        if not normalized or normalized in seen_titles:
+            continue
+        seen_titles.add(normalized)
+        key_events.append(
+            {
+                "title": event.title,
+                "summary": str(event.summary or "")[:220],
+                "category": event.category,
+                "score": round(float(event.final_score), 4),
+                "importance": int(event.importance),
+                "source": event.source,
+                "tags": list(event.tags or [])[:4],
+                "timestamp": event.timestamp.isoformat(),
+            }
+        )
+        if len(key_events) >= max(3, min(5, max_events)):
+            break
+
+    trend_keywords = ("rise", "rises", "surge", "growth", "improves", "record")
+    anomaly_keywords = ("breach", "outage", "crash", "urgent", "spike")
+    risk_keywords = ("risk", "regulation", "breach", "outage", "volatility", "sanction")
+    signals: list[str] = []
+    for ev in key_events:
+        title_low = str(ev.get("title") or "").lower()
+        tags_low = " ".join([str(t).lower() for t in ev.get("tags") or []])
+        mixed = f"{title_low} {tags_low}"
+        if any(k in mixed for k in trend_keywords):
+            signals.append(f"trend:{ev.get('title')}")
+        if any(k in mixed for k in anomaly_keywords):
+            signals.append(f"anomaly:{ev.get('title')}")
+        if any(k in mixed for k in risk_keywords):
+            signals.append(f"risk:{ev.get('title')}")
+    dedup_signals: list[str] = []
+    seen_signals: set[str] = set()
+    for signal in signals:
+        if signal in seen_signals:
+            continue
+        seen_signals.add(signal)
+        dedup_signals.append(signal)
+        if len(dedup_signals) >= 8:
+            break
+
+    if key_events:
+        summary = " | ".join(
+            [f"{item['title']} (score:{item['score']:.2f}, cat:{item['category']})" for item in key_events[:3]]
+        )
+    else:
+        summary = "No high-confidence events available."
+
+    confidence = 0.0
+    if key_events:
+        confidence = sum(float(item["score"]) for item in key_events) / float(len(key_events))
+        confidence = max(0.0, min(1.0, confidence))
+
+    return {
+        "key_events": key_events,
+        "summary": summary[:900],
+        "signals": dedup_signals,
+        "confidence": round(confidence, 4),
+    }
