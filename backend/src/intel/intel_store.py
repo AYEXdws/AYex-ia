@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import threading
 
@@ -42,10 +42,20 @@ class IntelStore:
         with self._lock:
             ordered = sorted(
                 self._events,
-                key=lambda x: x.timestamp or datetime.min,
+                key=lambda x: self._normalize_sort_timestamp(getattr(x, "timestamp", None)),
                 reverse=True,
             )
             return ordered[: max(1, min(100, limit))]
+
+    def _normalize_sort_timestamp(self, ts) -> datetime:
+        if not isinstance(ts, datetime):
+            return datetime.min
+        if ts.tzinfo is not None:
+            try:
+                return ts.astimezone(timezone.utc).replace(tzinfo=None)
+            except Exception:
+                return datetime.min
+        return ts
 
     def _is_duplicate_title(self, title: str) -> bool:
         normalized = (title or "").strip().lower()
