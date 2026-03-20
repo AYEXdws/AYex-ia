@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from backend.src.intel.intel_service import build_intel_context, get_intel_summary, select_relevant_intel_context
+from backend.src.intel.intel_service import build_intel_context, get_intel_summary
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
@@ -203,115 +202,50 @@ def is_intel_query(text: str) -> bool:
     return any(re.search(p, low) for p in analysis_patterns)
 
 
-_HIGH_SIGNAL_KEYWORDS = [
-    "ne oluyor",
-    "durum ne",
-    "analiz",
-    "gelisme",
-    "neden",
-    "etki",
-    "risk",
-    "firsat",
-    "piyasa",
-    "gundem",
-    "olay",
-    "son durum",
-]
-
-
-def _recent_high_importance_exists(events: list) -> bool:
-    recent = sorted(
-        events,
-        key=lambda ev: getattr(ev, "timestamp", None) or datetime.min,
-        reverse=True,
-    )[:8]
-    for ev in recent:
-        importance = int(getattr(ev, "importance", 0) or 0)
-        source = _normalize_text(str(getattr(ev, "source", "") or ""))
-        if importance >= 8 and source != "seed":
-            return True
-    return False
-
-
-def should_use_intel(text: str, events: list) -> bool:
-    if not events:
-        return False
-    if is_intel_query(text):
-        return True
-    low = _normalize_text(text)
-    if any(k in low for k in _HIGH_SIGNAL_KEYWORDS):
-        return True
-    if _recent_high_importance_exists(events):
-        return True
-    return False
-
-
-def _intel_mode_reason(text: str, events: list) -> str:
-    if not events:
-        return "no_events"
-    if is_intel_query(text):
-        return "intel_query"
-    low = _normalize_text(text)
-    if any(k in low for k in _HIGH_SIGNAL_KEYWORDS):
-        return "high_signal_keyword"
-    if _recent_high_importance_exists(events):
-        return "high_importance_recent_event"
-    return "off"
-
-
-def _merge_hybrid_events(relevant_events: list[dict], global_events: list[dict], limit: int = 5) -> list[dict]:
-    merged: list[dict] = []
-    seen: set[str] = set()
-    for item in list(relevant_events) + list(global_events):
-        title = str(item.get("title") or "").strip()
-        norm = _normalize_text(title)
-        if not norm or norm in seen:
+def _build_intel_context_from_events(events: list[Any]) -> dict[str, Any]:
+    key_events: list[dict[str, Any]] = []
+    signals: list[str] = []
+    for ev in events[:10]:
+        title = str(getattr(ev, "title", "") or "").strip()
+        if not title:
             continue
-        seen.add(norm)
-        merged.append(item)
-        if len(merged) >= limit:
-            break
-    return merged
-
-
-def _build_hybrid_intel_context(services: BackendServices, *, user_id: str, query: str) -> dict[str, Any]:
-    relevant = select_relevant_intel_context(services.intel, query, user_id=user_id, max_events=5)
-    global_ctx = build_intel_context(services.intel, user_id=user_id, max_events=5)
-    relevant_events = list(relevant.get("key_events") or [])
-    global_top2 = list(global_ctx.get("key_events") or [])[:2]
-    final_events = _merge_hybrid_events(relevant_events, global_top2, limit=5)
-
-    signals = list(relevant.get("signals") or [])
-    for sig in global_ctx.get("signals") or []:
-        if sig not in signals:
-            signals.append(sig)
-        if len(signals) >= 8:
-            break
-
-    if final_events:
-        summary = " | ".join(
-            [
-                f"{str(ev.get('title') or '')} (score:{float(ev.get('effective_score') or ev.get('score') or 0.0):.2f})"
-                for ev in final_events[:3]
-            ]
+        summary = str(getattr(ev, "summary", "") or "").strip()
+        category = str(getattr(ev, "category", "other") or "other")
+        source = str(getattr(ev, "source", "unknown") or "unknown")
+        score = float(getattr(ev, "final_score", 0.0) or 0.0)
+        importance = int(getattr(ev, "importance", 0) or 0)
+        tags = list(getattr(ev, "tags", []) or [])[:4]
+        timestamp = getattr(ev, "timestamp", None)
+        key_events.append(
+            {
+                "title": title,
+                "summary": summary[:220],
+                "category": category,
+                "source": source,
+                "score": round(score, 4),
+                "importance": importance,
+                "tags": tags,
+                "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else "",
+            }
         )
-    else:
-        summary = str(relevant.get("summary") or global_ctx.get("summary") or "").strip()
-
+        if any(k in _normalize_text(summary + " " + title) for k in ("risk", "breach", "outage", "volatility")):
+            sig = f"risk:{title}"
+            if sig not in signals:
+                signals.append(sig)
+        if len(key_events) >= 5:
+            break
+    summary_text = " | ".join([f"{e['title']} ({e['category']})" for e in key_events[:3]]) if key_events else ""
     confidence = 0.0
-    if final_events:
-        confidence = sum(float(ev.get("effective_score") or ev.get("score") or 0.0) for ev in final_events) / float(
-            len(final_events)
-        )
+    if key_events:
+        confidence = sum(float(e["score"]) for e in key_events) / float(len(key_events))
         confidence = max(0.0, min(1.0, confidence))
-
     return {
-        "key_events": final_events,
-        "summary": summary[:900],
+        "key_events": key_events,
+        "summary": summary_text[:900],
         "signals": signals[:8],
         "confidence": round(confidence, 4),
-        "recency_note": str(relevant.get("recency_note") or global_ctx.get("recency_note") or ""),
-        "query_focus": relevant.get("query_focus") or {},
+        "recency_note": "latest_events",
+        "query_focus": {},
     }
 
 
@@ -321,7 +255,7 @@ def _build_intel_injection_text(intel_context: dict[str, Any], compact_summary: 
     for item in events[:5]:
         title = str(item.get("title") or "").strip()
         summary = str(item.get("summary") or "").strip()[:140]
-        event_lines.append(f"- {title}: {summary}")
+        event_lines.append(f"- [{title}]: {summary}")
     if not event_lines:
         event_lines = ["- Yuksek oncelikli olay bulunamadi."]
     block = (
@@ -587,14 +521,18 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     ai_source = "openclaw" if services.settings.openclaw_enabled else "openai_direct"
     text = (payload.text or "").strip()
     if not text:
-        return ChatResponse(reply="Bos mesaj gonderilemez.", session_id=payload.session_id or "", metrics={"ok": False})
+        return ChatResponse(
+            reply="Bos mesaj gonderilemez.",
+            session_id=payload.session_id or "",
+            metrics={"ok": False, "intel_used": False, "intel_event_count": 0},
+        )
 
     guard = services.cost_guard.check_and_track(text)
     if not guard.ok:
         return ChatResponse(
             reply=guard.reason,
             session_id=payload.session_id or "",
-            metrics={"source": "guard", "ok": False, "usage": guard.usage or {}},
+            metrics={"source": "guard", "ok": False, "usage": guard.usage or {}, "intel_used": False, "intel_event_count": 0},
         )
 
     session = services.chat_store.ensure_session(payload.session_id, title_hint=text)
@@ -627,6 +565,8 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
                 "memory_hits": 0,
                 "used_model": prev_metrics.get("used_model", ""),
                 "model_locked": bool(prev_metrics.get("model_locked", False)),
+                "intel_used": bool(prev_metrics.get("intel_used", False)),
+                "intel_event_count": int(prev_metrics.get("intel_event_count", 0) or 0),
             },
         )
 
@@ -641,16 +581,16 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     )
     long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
     long_memory_text = long_memory_ctx.as_text()
-    stored_events = services.intel.store.get_all_events()
-    mode_reason = _intel_mode_reason(text, stored_events)
-    intel_mode = should_use_intel(text, stored_events)
+    latest_events = services.intel.get_latest_events(limit=10)
+    intel_mode = len(latest_events) > 0
+    mode_reason = "events_available" if intel_mode else "no_events"
     logger.info("INTEL_MODE=%s reason=%s", "on" if intel_mode else "off", mode_reason)
     intel_context: dict[str, Any] = {}
     intel_data = ""
     user_focus = "general"
     injected_event_count = 0
     if intel_mode:
-        intel_context = _build_hybrid_intel_context(services, user_id=user_id, query=text)
+        intel_context = _build_intel_context_from_events(latest_events)
         compact_intel = get_intel_summary(services.intel, user_id=user_id, max_chars=1000)
         selected_events = intel_context.get("key_events") or []
         injected_event_count = len(selected_events)
@@ -679,7 +619,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     if tool_context:
         model_input = f"Kullanici sorusu: {text}\n\nTool kaniti:\n{tool_context}"
     if intel_mode:
-        intel_block = intel_data if intel_data else "ISTIHBARAT VERISI:\n- Temel Olaylar:\nYuksek oncelikli olay yok."
+        intel_block = intel_data if intel_data else "INTEL_CONTEXT:\n- Key Events:\n- Yuksek oncelikli olay yok.\n\nINTEL_SUMMARY:\nYeterli intel yok."
         intel_system_prompt = (
             "AYEX-IA olarak yalnizca Turkce yanit ver.\n"
             "Ingilizce kelime, baslik veya cumle kullanma.\n\n"
@@ -693,7 +633,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             "Zorunlu kurallar:\n"
             "- Yanit Turkce olacak, dogal ve net olacak.\n"
             "- Secilen olay/sinyalleri ad veya kavram seviyesinde acikca referansla.\n"
-            "- Cevapta en az bir olay basligini aynen yaz (ornek: 'Auth test event').\n"
+            "- En az bir olay basligini aynen yazarak referans ver.\n"
             "- Neden-sonuc zinciri kur: 'bu nedenle', 'sonucunda', 'tetikler' gibi acik baglantilar kullan.\n"
             "- Kisa vadeli etkileri belirt (onumuzdeki 24-48 saat / kisa vade).\n"
             "- Bos, genel, ezber cümle kullanma.\n"
@@ -818,6 +758,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             "tool": tool_result.selected_tool,
             "response_score": response_scores,
             "intel_used": used_intel,
+            "intel_event_count": injected_event_count,
         },
     )
     services.long_memory.sync_profile(profile_data, user_id=user_id)
@@ -848,5 +789,6 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             "tool": tool_result.selected_tool,
             "response_score": response_scores,
             "intel_used": used_intel,
+            "intel_event_count": injected_event_count,
         },
     )

@@ -114,6 +114,9 @@ class IntelService:
         self.store = store
         self.openai_client = openai_client
 
+    def get_latest_events(self, limit: int = 10) -> list[IntelEvent]:
+        return self.store.get_latest_events(limit=limit)
+
     def create_event(
         self,
         *,

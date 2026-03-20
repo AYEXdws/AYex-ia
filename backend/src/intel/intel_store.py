@@ -38,6 +38,15 @@ class IntelStore:
             ordered = sorted(self._events, key=lambda x: float(x.final_score), reverse=True)
             return ordered[: max(1, min(100, limit))]
 
+    def get_latest_events(self, limit: int = 10) -> list[IntelEvent]:
+        with self._lock:
+            ordered = sorted(
+                self._events,
+                key=lambda x: x.timestamp or datetime.min,
+                reverse=True,
+            )
+            return ordered[: max(1, min(100, limit))]
+
     def _is_duplicate_title(self, title: str) -> bool:
         normalized = (title or "").strip().lower()
         if not normalized:
