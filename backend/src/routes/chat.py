@@ -160,6 +160,14 @@ def validate_response_detailed(text: str) -> tuple[bool, str]:
     if any(p in low for p in banned_generic):
         return False, "generic_phrase"
 
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    list_like = 0
+    for line in lines:
+        if re.match(r"^[-*•]\s+", line) or re.match(r"^\d+[\).\s-]+", line):
+            list_like += 1
+    if lines and (list_like / max(1, len(lines))) > 0.6:
+        return False, "list_style_weak"
+
     section_patterns = {
         "insight": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:key\s*insight|temel\s*icgor[uü]|ana\s*icgor[uü])\b",
         "why": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:why\s*it\s*matters|neden\s*onemli|neden\s*kritik)\b",
@@ -183,6 +191,53 @@ def validate_response_detailed(text: str) -> tuple[bool, str]:
     )
     if not any(m in low for m in causal_markers):
         return False, "causal_missing"
+
+    mechanism_terms = (
+        "because",
+        "therefore",
+        "implies",
+        "leads to",
+        "transmission",
+        "liquidity",
+        "funding",
+        "spread",
+        "rotation",
+        "risk-off",
+        "risk on",
+        "bu nedenle",
+        "sonucunda",
+        "kanaliyla",
+        "tetikleyerek",
+        "mekanizma",
+    )
+    if not any(t in low for t in mechanism_terms):
+        return False, "mechanism_missing"
+
+    if ("volatility" in low or "oynaklik" in low or "regulation" in low or "duzenleme" in low) and not any(
+        t in low for t in ("because", "bu nedenle", "sonucunda", "leads to", "implies")
+    ):
+        return False, "generic_topic_without_mechanism"
+
+    near_term_markers = (
+        "near-term",
+        "next 24h",
+        "next 48h",
+        "next session",
+        "short-term",
+        "kisa vade",
+        "kisa vadede",
+        "onumuzdeki 24 saat",
+        "onumuzdeki 48 saat",
+    )
+    if not any(m in low for m in near_term_markers):
+        return False, "near_term_missing"
+
+    why_anchor = re.search(r"(why\s*it\s*matters|neden\s*onemli|neden\s*kritik)", low, flags=re.IGNORECASE)
+    if why_anchor:
+        tail = low[why_anchor.start() : why_anchor.start() + 240]
+        if len(_extract_tokens(tail)) < 8:
+            return False, "why_section_weak"
+
     return True, "ok"
 
 
@@ -272,10 +327,12 @@ def build_safe_fallback_response(intel_context: dict[str, Any], user_text: str) 
     if not events:
         return (
             "1. Key Insight\n"
-            "Current signal density is low; available intelligence does not support a high-conviction directional call.\n\n"
+            "Strongest available intel event: none. Current signal density is low, so no high-conviction directional call is justified.\n\n"
             "2. Why It Matters\n"
             "Low-confidence conditions increase model risk because weak evidence can produce false certainty in decision making.\n\n"
-            "3. What to Watch\n"
+            "3. Risk / Opportunity\n"
+            "Risk: false positives from narrative-driven positioning. Opportunity: wait for signal clustering before acting.\n\n"
+            "4. What to Watch\n"
             "Watch for fresh high-score events, repeated anomaly signals, and confidence rising above 0.60 before taking aggressive action."
         )
 
@@ -289,11 +346,13 @@ def build_safe_fallback_response(intel_context: dict[str, Any], user_text: str) 
 
     return (
         "1. Key Insight\n"
-        f"Primary signal is '{title}' ({category}) with effective score {score:.2f}; this currently dominates the intelligence stack.\n\n"
+        f"Strongest available intel event is '{title}' ({category}) with effective score {score:.2f}; this currently dominates the intelligence stack.\n\n"
         "2. Why It Matters\n"
         f"The event aligns with '{signal}', which implies near-term pressure channels can propagate into {focus_text}; "
         f"confidence is {confidence:.2f}, so the signal is actionable but should be monitored for confirmation.\n\n"
-        "3. What to Watch\n"
+        "3. Risk / Opportunity\n"
+        "Risk: signal decay if follow-through data weakens. Opportunity: confirmation-driven positioning if related high-score events cluster.\n\n"
+        "4. What to Watch\n"
         "Track whether related signals cluster in the next cycle, whether risk-tagged events accelerate, and whether confidence trends up or down."
     )
 
@@ -433,6 +492,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         )
 
     reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
+    final_response_mode = "llm"
     used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
     logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
     is_valid, validation_reason = validate_response_detailed(reply)
@@ -462,10 +522,15 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
         is_valid, validation_reason = validate_response_detailed(reply)
         logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
+        if is_valid and used_intel:
+            final_response_mode = "regen"
         if not is_valid or not used_intel:
+            logger.info("REGEN_VALIDATION_FAILED reason=%s", validation_reason if not is_valid else intel_reason)
             logger.info("RESPONSE_REJECTED_AFTER_REGEN reason=%s", validation_reason if not is_valid else intel_reason)
             reply = build_safe_fallback_response(intel_context, text)
             logger.info("SAFE_FALLBACK_USED")
+            final_response_mode = "fallback"
+    logger.info("FINAL_RESPONSE_MODE=%s", final_response_mode)
     response_scores = score_response(reply)
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
