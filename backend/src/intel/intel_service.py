@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.src.intel.event_model import IntelEvent
 from backend.src.intel.intel_store import IntelStore
@@ -289,19 +289,47 @@ def build_intel_context(service: IntelService, user_id: str, *, max_events: int 
     scored = sorted(events, key=lambda e: float(e.final_score), reverse=True)
     filtered = service.filter_by_user_profile(scored, user_id=user_id)
 
+    now_utc = datetime.utcnow()
+    ranked_events: list[tuple[float, float, str, IntelEvent]] = []
+    for event in filtered:
+        ts = event.timestamp
+        if ts.tzinfo is not None:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+        age_hours = max(0.0, (now_utc - ts).total_seconds() / 3600.0)
+        if age_hours < 6:
+            freshness_multiplier = 1.15
+            time_window = "<6h"
+        elif age_hours < 24:
+            freshness_multiplier = 1.08
+            time_window = "<24h"
+        elif age_hours < 72:
+            freshness_multiplier = 1.00
+            time_window = "<72h"
+        else:
+            freshness_multiplier = 0.90
+            time_window = ">72h"
+        effective_score = float(event.final_score) * freshness_multiplier
+        ranked_events.append((effective_score, freshness_multiplier, time_window, event))
+
+    ranked_events.sort(key=lambda x: x[0], reverse=True)
+
     seen_titles: set[str] = set()
     key_events: list[dict] = []
-    for event in filtered:
+    time_windows: list[str] = []
+    for effective_score, freshness_multiplier, time_window, event in ranked_events:
         normalized = re.sub(r"\s+", " ", str(event.title or "").strip().lower())
         if not normalized or normalized in seen_titles:
             continue
         seen_titles.add(normalized)
+        time_windows.append(time_window)
         key_events.append(
             {
                 "title": event.title,
                 "summary": str(event.summary or "")[:220],
                 "category": event.category,
                 "score": round(float(event.final_score), 4),
+                "effective_score": round(float(effective_score), 4),
+                "freshness_multiplier": round(float(freshness_multiplier), 2),
                 "importance": int(event.importance),
                 "source": event.source,
                 "tags": list(event.tags or [])[:4],
@@ -342,9 +370,14 @@ def build_intel_context(service: IntelService, user_id: str, *, max_events: int 
     else:
         summary = "No high-confidence events available."
 
+    if time_windows:
+        dominant_time_window = max(set(time_windows), key=time_windows.count)
+    else:
+        dominant_time_window = "unknown"
+
     confidence = 0.0
     if key_events:
-        confidence = sum(float(item["score"]) for item in key_events) / float(len(key_events))
+        confidence = sum(float(item["effective_score"]) for item in key_events) / float(len(key_events))
         confidence = max(0.0, min(1.0, confidence))
 
     return {
@@ -352,4 +385,5 @@ def build_intel_context(service: IntelService, user_id: str, *, max_events: int 
         "summary": summary[:900],
         "signals": dedup_signals,
         "confidence": round(confidence, 4),
+        "recency_note": f"dominant_time_window={dominant_time_window}",
     }

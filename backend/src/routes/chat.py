@@ -15,6 +15,56 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+def _normalize_text(text: str) -> str:
+    low = (text or "").lower()
+    table = str.maketrans(
+        {
+            "ç": "c",
+            "ğ": "g",
+            "ı": "i",
+            "İ": "i",
+            "ö": "o",
+            "ş": "s",
+            "ü": "u",
+        }
+    )
+    return low.translate(table)
+
+
+def _extract_tokens(text: str) -> set[str]:
+    stopwords = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "this",
+        "that",
+        "from",
+        "into",
+        "your",
+        "have",
+        "will",
+        "about",
+        "olarak",
+        "icin",
+        "ve",
+        "ile",
+        "ama",
+        "gibi",
+        "daha",
+        "cok",
+        "kadar",
+        "olan",
+        "olanlar",
+        "sadece",
+        "genel",
+        "bazi",
+        "gore",
+    }
+    tokens = set(re.findall(r"[a-z0-9]{3,}", _normalize_text(text)))
+    return {t for t in tokens if len(t) >= 4 and t not in stopwords}
+
+
 def get_latest_intel(services: BackendServices, *, user_id: str = "default") -> dict[str, Any]:
     try:
         intel_context = build_intel_context(services.intel, user_id=user_id)
@@ -22,10 +72,11 @@ def get_latest_intel(services: BackendServices, *, user_id: str = "default") -> 
             logger.info("INTEL_FETCH_FAIL reason=invalid_intel_context")
             return {}
         logger.info(
-            "INTEL_CONTEXT_BUILT events=%s signals=%s confidence=%.3f",
+            "INTEL_CONTEXT_BUILT event_count=%s signal_count=%s confidence=%.3f time_window=%s",
             len(intel_context.get("key_events") or []),
             len(intel_context.get("signals") or []),
             float(intel_context.get("confidence") or 0.0),
+            str(intel_context.get("recency_note") or "unknown"),
         )
         logger.info("INTEL_FETCH_SUCCESS source=internal")
         return intel_context
@@ -39,6 +90,7 @@ def format_intel_for_prompt(intel_context: dict[str, Any]) -> str:
     signals = intel_context.get("signals") or []
     summary = str(intel_context.get("summary") or "").strip()
     confidence = float(intel_context.get("confidence") or 0.0)
+    recency_note = str(intel_context.get("recency_note") or "").strip()
 
     event_lines = []
     for idx, item in enumerate(key_events[:5], start=1):
@@ -64,6 +116,7 @@ def format_intel_for_prompt(intel_context: dict[str, Any]) -> str:
         + "\n- Summary:\n"
         + (summary or "No intel summary.")
         + f"\n- Confidence: {confidence:.2f}"
+        + (f"\n- Recency: {recency_note}" if recency_note else "")
     )[:2200]
 
 
@@ -85,46 +138,117 @@ def extract_user_focus(services: BackendServices, session_id: str, current_text:
 
 
 def validate_response(text: str) -> bool:
-    low = str(text or "").lower()
+    valid, _ = validate_response_detailed(text)
+    return valid
+
+
+def validate_response_detailed(text: str) -> tuple[bool, str]:
+    low = _normalize_text(str(text or ""))
     if not low.strip():
-        return False
+        return False, "empty"
     banned_generic = (
         "generally",
         "in general",
         "volatility exists",
         "it depends",
         "could be many reasons",
-        "zor söylemek",
+        "zor soylemek",
         "genel olarak",
+        "piyasa dalgali",
+        "belirsizlik var",
     )
     if any(p in low for p in banned_generic):
-        return False
-    required_sections = ("key insight", "why it matters", "risk", "what to watch")
-    if sum(1 for s in required_sections if s in low) < 3:
-        return False
-    causal_markers = ("because", "leads to", "implies", "drives", "therefore", "bu nedenle", "tetikler")
+        return False, "generic_phrase"
+
+    section_patterns = {
+        "insight": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:key\s*insight|temel\s*icgor[uü]|ana\s*icgor[uü])\b",
+        "why": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:why\s*it\s*matters|neden\s*onemli|neden\s*kritik)\b",
+        "risk": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:risk\s*(?:/|\||veya|-)?\s*(?:opportunity|firsat)|risk|firsat)\b",
+        "watch": r"(?:^|\n)\s*(?:\d+[\).\s-]*)?(?:what\s*to\s*watch|izlenecekler|izlenmesi\s*gerekenler)\b",
+    }
+    section_hits = sum(1 for _, pat in section_patterns.items() if re.search(pat, low, flags=re.IGNORECASE))
+    if section_hits < 3:
+        return False, "section_missing"
+
+    causal_markers = (
+        "because",
+        "leads to",
+        "implies",
+        "drives",
+        "therefore",
+        "bu nedenle",
+        "tetikler",
+        "sonucunda",
+        "neden olur",
+    )
     if not any(m in low for m in causal_markers):
-        return False
-    return True
+        return False, "causal_missing"
+    return True, "ok"
 
 
 def did_use_intel(response: str, intel_context: dict[str, Any]) -> bool:
-    low = str(response or "").lower()
+    used, _ = did_use_intel_detailed(response, intel_context)
+    return used
+
+
+def did_use_intel_detailed(response: str, intel_context: dict[str, Any]) -> tuple[bool, str]:
+    low = _normalize_text(str(response or ""))
     if not low.strip():
-        return False
+        return False, "empty_response"
+    response_tokens = _extract_tokens(low)
+    if not response_tokens:
+        return False, "low_token_density"
+
     events = intel_context.get("key_events") or []
-    refs = 0
+    if not events:
+        return False, "no_intel_events"
+
+    title_hit = 0
+    summary_overlap = 0
+    category_hit = 0
+    signal_hit = 0
+    intel_token_bag: set[str] = set()
+
     for item in events[:5]:
-        title = str(item.get("title") or "").strip().lower()
-        if title and (title in low or any(tok in low for tok in re.findall(r"[a-z0-9]{4,}", title)[:3])):
-            refs += 1
-    if refs > 0:
-        return True
+        title = _normalize_text(str(item.get("title") or "").strip())
+        title_tokens = _extract_tokens(title)
+        intel_token_bag |= title_tokens
+        if title and title in low:
+            title_hit += 1
+        elif len(response_tokens & title_tokens) >= 2:
+            title_hit += 1
+
+        summary = _normalize_text(str(item.get("summary") or ""))
+        summary_tokens = _extract_tokens(summary)
+        intel_token_bag |= summary_tokens
+        if len(response_tokens & summary_tokens) >= 2:
+            summary_overlap += 1
+
+        category = _normalize_text(str(item.get("category") or "").strip())
+        if category:
+            cat_tokens = _extract_tokens(category) or {category}
+            intel_token_bag |= cat_tokens
+            if response_tokens & cat_tokens:
+                category_hit += 1
+
     for sig in intel_context.get("signals") or []:
-        part = str(sig or "").split(":", 1)[-1].strip().lower()
-        if part and part in low:
-            return True
-    return False
+        sig_norm = _normalize_text(str(sig or ""))
+        sig_tokens = _extract_tokens(sig_norm)
+        intel_token_bag |= sig_tokens
+        if sig_norm and sig_norm in low:
+            signal_hit += 1
+            continue
+        if response_tokens & sig_tokens:
+            signal_hit += 1
+
+    concept_overlap = len(response_tokens & intel_token_bag)
+    if title_hit >= 1 and concept_overlap >= 2:
+        return True, "title_overlap"
+    if signal_hit >= 1 and concept_overlap >= 2:
+        return True, "signal_overlap"
+    if category_hit >= 1 and summary_overlap >= 1 and concept_overlap >= 3:
+        return True, "category_summary_overlap"
+    return False, "insufficient_intel_reference"
 
 
 def score_response(response: str) -> dict[str, float]:
@@ -138,6 +262,40 @@ def score_response(response: str) -> dict[str, float]:
         "relevance_score": round((causal_score * 0.6) + (intel_score * 0.4), 4),
         "intel_usage_score": round(intel_score, 4),
     }
+
+
+def build_safe_fallback_response(intel_context: dict[str, Any], user_text: str) -> str:
+    events = intel_context.get("key_events") or []
+    signals = intel_context.get("signals") or []
+    confidence = float(intel_context.get("confidence") or 0.0)
+
+    if not events:
+        return (
+            "1. Key Insight\n"
+            "Current signal density is low; available intelligence does not support a high-conviction directional call.\n\n"
+            "2. Why It Matters\n"
+            "Low-confidence conditions increase model risk because weak evidence can produce false certainty in decision making.\n\n"
+            "3. What to Watch\n"
+            "Watch for fresh high-score events, repeated anomaly signals, and confidence rising above 0.60 before taking aggressive action."
+        )
+
+    top = events[0]
+    title = str(top.get("title") or "Top event")
+    category = str(top.get("category") or "other")
+    score = float(top.get("effective_score") or top.get("score") or 0.0)
+    signal = str(signals[0] if signals else f"risk:{title}")
+    user_focus_tokens = _extract_tokens(user_text)
+    focus_text = " / ".join(sorted(list(user_focus_tokens))[:3]) if user_focus_tokens else "current user focus"
+
+    return (
+        "1. Key Insight\n"
+        f"Primary signal is '{title}' ({category}) with effective score {score:.2f}; this currently dominates the intelligence stack.\n\n"
+        "2. Why It Matters\n"
+        f"The event aligns with '{signal}', which implies near-term pressure channels can propagate into {focus_text}; "
+        f"confidence is {confidence:.2f}, so the signal is actionable but should be monitored for confirmation.\n\n"
+        "3. What to Watch\n"
+        "Track whether related signals cluster in the next cycle, whether risk-tagged events accelerate, and whether confidence trends up or down."
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -275,14 +433,12 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         )
 
     reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
-    used_intel = did_use_intel(reply, intel_context)
-    if used_intel:
-        logger.info("INTEL_USED_TRUE")
-    else:
-        logger.info("INTEL_USED_FALSE")
-    is_valid = validate_response(reply)
+    used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
+    logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
+    is_valid, validation_reason = validate_response_detailed(reply)
     if not is_valid or not used_intel:
-        logger.info("RESPONSE_REJECTED_GENERIC reason=%s", "intel_missing" if not used_intel else "generic_or_noncausal")
+        reason_type = "intel_missing" if not used_intel else validation_reason
+        logger.info("RESPONSE_REJECTED_GENERIC reason=%s", reason_type)
         retry_profile_context = (
             f"{profile_context_for_model}\n\n"
             "Your previous response ignored requirements. Regenerate once.\n"
@@ -303,8 +459,13 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         if retry_reply:
             reply = retry_reply
             result = retry_result
-        used_intel = did_use_intel(reply, intel_context)
-        logger.info("INTEL_USED_%s", "TRUE" if used_intel else "FALSE")
+        used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
+        is_valid, validation_reason = validate_response_detailed(reply)
+        logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
+        if not is_valid or not used_intel:
+            logger.info("RESPONSE_REJECTED_AFTER_REGEN reason=%s", validation_reason if not is_valid else intel_reason)
+            reply = build_safe_fallback_response(intel_context, text)
+            logger.info("SAFE_FALLBACK_USED")
     response_scores = score_response(reply)
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
