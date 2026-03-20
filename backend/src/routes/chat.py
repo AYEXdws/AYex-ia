@@ -137,6 +137,28 @@ def extract_user_focus(services: BackendServices, session_id: str, current_text:
     return " / ".join(labels[:3])
 
 
+def is_intel_query(text: str) -> bool:
+    low = _normalize_text(text)
+    keyword_groups = (
+        ("market", "crypto", "kripto", "btc", "eth", "altcoin", "finance", "finans", "fed", "faiz", "enflasyon"),
+        ("security", "guvenlik", "breach", "hack", "sizinti", "ihlal", "exploit", "ransomware"),
+        ("macro", "makro", "geopolit", "jeopolitik", "sinyal", "risk", "impact", "etki", "senaryo"),
+    )
+    if any(k in low for group in keyword_groups for k in group):
+        return True
+    analysis_patterns = (
+        r"\bwhat is happening\b",
+        r"\bwhat should i watch\b",
+        r"\bneyi izlemeliyim\b",
+        r"\bne oluyor\b",
+        r"\banaliz\b",
+        r"\bdegerlendir\b",
+        r"\bimpact\b",
+        r"\bris(k|k)\b",
+    )
+    return any(re.search(p, low) for p in analysis_patterns)
+
+
 def validate_response(text: str) -> bool:
     valid, _ = validate_response_detailed(text)
     return valid
@@ -417,9 +439,15 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     )
     long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
     long_memory_text = long_memory_ctx.as_text()
-    intel_context = get_latest_intel(services, user_id=user_id)
-    intel_data = format_intel_for_prompt(intel_context) if intel_context else ""
-    user_focus = extract_user_focus(services, session.id, text)
+    intel_mode = is_intel_query(text)
+    logger.info("INTEL_MODE=%s", "on" if intel_mode else "off")
+    intel_context: dict[str, Any] = {}
+    intel_data = ""
+    user_focus = "general"
+    if intel_mode:
+        intel_context = get_latest_intel(services, user_id=user_id)
+        intel_data = format_intel_for_prompt(intel_context) if intel_context else ""
+        user_focus = extract_user_focus(services, session.id, text)
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
     if long_memory_text:
         memory_hits += len(long_memory_ctx.conversation_hits) + len(long_memory_ctx.event_hits)
@@ -440,34 +468,37 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     model_input = text
     if tool_context:
         model_input = f"Kullanici sorusu: {text}\n\nTool kaniti:\n{tool_context}"
-    intel_block = intel_data if intel_data else "INTELLIGENCE DATA:\n- Key Events:\nNo high-priority events."
-    intel_system_prompt = (
-        "You are Ayex-IA, a private intelligence system.\n\n"
-        "Core Behavior:\n"
-        "- You are NOT an assistant. You are an intelligence analyst.\n"
-        "- You do NOT list information. You extract meaning.\n"
-        "- You do NOT repeat intel. You transform it into insight.\n\n"
-        "Use the following real-time intelligence data:\n\n"
-        f"{intel_block}\n\n"
-        f"User focus: {user_focus}\n\n"
-        "Rules:\n"
-        "- You MUST synthesize insights, not list facts.\n"
-        "- You MUST explicitly reference relevant intel data in your reasoning.\n"
-        "- You MUST explain WHY the events matter.\n"
-        "- You MUST connect events when there is a meaningful relationship.\n"
-        "- You MUST infer plausible outcomes (near-term and second-order effects).\n"
-        "- You MUST take a position; avoid neutral and vague language.\n"
-        "- You MUST avoid generic statements unless tied to concrete implications.\n"
-        "- If intel is weak, explain the limitation analytically.\n"
-        "- Do not say you lack real-time access.\n"
-        "- Tone: analytical, causal, concise-dense, no filler.\n\n"
-        "Response format (always follow):\n"
-        "1. Key Insight (1-2 sharp sentences)\n"
-        "2. Why It Matters\n"
-        "3. Risk / Opportunity\n"
-        "4. What to Watch\n"
-    )
-    profile_context_for_model = f"{services.profile.prompt_context()}\n\n{intel_system_prompt}"
+    if intel_mode:
+        intel_block = intel_data if intel_data else "INTELLIGENCE DATA:\n- Key Events:\nNo high-priority events."
+        intel_system_prompt = (
+            "You are Ayex-IA, a private intelligence system.\n\n"
+            "Core Behavior:\n"
+            "- You are NOT an assistant. You are an intelligence analyst.\n"
+            "- You do NOT list information. You extract meaning.\n"
+            "- You do NOT repeat intel. You transform it into insight.\n\n"
+            "Use the following real-time intelligence data:\n\n"
+            f"{intel_block}\n\n"
+            f"User focus: {user_focus}\n\n"
+            "Rules:\n"
+            "- You MUST synthesize insights, not list facts.\n"
+            "- You MUST explicitly reference relevant intel data in your reasoning.\n"
+            "- You MUST explain WHY the events matter.\n"
+            "- You MUST connect events when there is a meaningful relationship.\n"
+            "- You MUST infer plausible outcomes (near-term and second-order effects).\n"
+            "- You MUST take a position; avoid neutral and vague language.\n"
+            "- You MUST avoid generic statements unless tied to concrete implications.\n"
+            "- If intel is weak, explain the limitation analytically.\n"
+            "- Do not say you lack real-time access.\n"
+            "- Tone: analytical, causal, concise-dense, no filler.\n\n"
+            "Response format (always follow):\n"
+            "1. Key Insight (1-2 sharp sentences)\n"
+            "2. Why It Matters\n"
+            "3. Risk / Opportunity\n"
+            "4. What to Watch\n"
+        )
+        profile_context_for_model = f"{services.profile.prompt_context()}\n\n{intel_system_prompt}"
+    else:
+        profile_context_for_model = services.profile.prompt_context()
 
     if intent.category == "agent_task":
         agent_res = services.agent_mode.run(
@@ -493,43 +524,45 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
 
     reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
     final_response_mode = "llm"
-    used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
-    logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
-    is_valid, validation_reason = validate_response_detailed(reply)
-    if not is_valid or not used_intel:
-        reason_type = "intel_missing" if not used_intel else validation_reason
-        logger.info("RESPONSE_REJECTED_GENERIC reason=%s", reason_type)
-        retry_profile_context = (
-            f"{profile_context_for_model}\n\n"
-            "Your previous response ignored requirements. Regenerate once.\n"
-            "You MUST use intel data explicitly, include causal links, and follow the exact 4-section format."
-        )
-        logger.info("RESPONSE_REGENERATED")
-        retry_result = services.openclaw.run_action(
-            model_input,
-            workspace=payload.workspace,
-            model=payload.model,
-            history=history,
-            profile_context=retry_profile_context,
-            memory_context=merged_memory,
-            response_style=style_decision.style,
-            route_name="chat_regen",
-        )
-        retry_reply = (retry_result.text or "").strip()
-        if retry_reply:
-            reply = retry_reply
-            result = retry_result
+    used_intel = False
+    if intel_mode:
         used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
-        is_valid, validation_reason = validate_response_detailed(reply)
         logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
-        if is_valid and used_intel:
-            final_response_mode = "regen"
+        is_valid, validation_reason = validate_response_detailed(reply)
         if not is_valid or not used_intel:
-            logger.info("REGEN_VALIDATION_FAILED reason=%s", validation_reason if not is_valid else intel_reason)
-            logger.info("RESPONSE_REJECTED_AFTER_REGEN reason=%s", validation_reason if not is_valid else intel_reason)
-            reply = build_safe_fallback_response(intel_context, text)
-            logger.info("SAFE_FALLBACK_USED")
-            final_response_mode = "fallback"
+            reason_type = "intel_missing" if not used_intel else validation_reason
+            logger.info("RESPONSE_REJECTED_GENERIC reason=%s", reason_type)
+            retry_profile_context = (
+                f"{profile_context_for_model}\n\n"
+                "Your previous response ignored requirements. Regenerate once.\n"
+                "You MUST use intel data explicitly, include causal links, and follow the exact 4-section format."
+            )
+            logger.info("RESPONSE_REGENERATED")
+            retry_result = services.openclaw.run_action(
+                model_input,
+                workspace=payload.workspace,
+                model=payload.model,
+                history=history,
+                profile_context=retry_profile_context,
+                memory_context=merged_memory,
+                response_style=style_decision.style,
+                route_name="chat_regen",
+            )
+            retry_reply = (retry_result.text or "").strip()
+            if retry_reply:
+                reply = retry_reply
+                result = retry_result
+            used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
+            is_valid, validation_reason = validate_response_detailed(reply)
+            logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
+            if is_valid and used_intel:
+                final_response_mode = "regen"
+            if not is_valid or not used_intel:
+                logger.info("REGEN_VALIDATION_FAILED reason=%s", validation_reason if not is_valid else intel_reason)
+                logger.info("RESPONSE_REJECTED_AFTER_REGEN reason=%s", validation_reason if not is_valid else intel_reason)
+                reply = build_safe_fallback_response(intel_context, text)
+                logger.info("SAFE_FALLBACK_USED")
+                final_response_mode = "fallback"
     logger.info("FINAL_RESPONSE_MODE=%s", final_response_mode)
     response_scores = score_response(reply)
 
