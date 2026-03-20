@@ -10,6 +10,7 @@ from backend.src.intel.intel_store import IntelStore
 from backend.src.memory.manager import MemoryManager
 from backend.src.services.agent_mode import AgentModeService
 from backend.src.services.agent_registry import AgentRegistry
+from backend.src.services.auth_service import AuthService
 from backend.src.services.chat_store import ChatStore
 from backend.src.services.cost_guard import CostGuardService
 from backend.src.services.intent_router import IntentRouter
@@ -42,6 +43,7 @@ class BackendServices:
     openclaw: OpenClawService
     chat_store: ChatStore
     profile: ProfileService
+    auth: AuthService
     style: ResponseStyleService
     long_memory: LongMemoryService
     agent_mode: AgentModeService
@@ -74,6 +76,7 @@ def build_services() -> BackendServices:
     openclaw = OpenClawService(settings, agents=agents)
     chat_store = ChatStore(settings)
     profile = ProfileService(settings)
+    auth = AuthService()
     style = ResponseStyleService()
     long_memory = LongMemoryService(settings)
     long_memory.sync_profile(profile.load())
@@ -103,6 +106,7 @@ def build_services() -> BackendServices:
         openclaw=openclaw,
         chat_store=chat_store,
         profile=profile,
+        auth=auth,
         style=style,
         long_memory=long_memory,
         agent_mode=agent_mode,
