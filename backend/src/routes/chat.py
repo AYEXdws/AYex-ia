@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
-from urllib import request as urlrequest
-
 from fastapi import APIRouter, Depends, Request
 
+from backend.src.intel.intel_service import get_intel_summary
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
@@ -14,23 +12,12 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-def get_latest_intel() -> str:
-    endpoint = "http://localhost:8000/intel"
+def get_latest_intel(services: BackendServices, *, user_id: str = "default") -> str:
     try:
-        req = urlrequest.Request(endpoint, headers={"Accept": "application/json"})
-        with urlrequest.urlopen(req, timeout=2) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        if not isinstance(data, dict):
-            logger.info("INTEL_FETCH_FAIL reason=invalid_payload_type")
+        text = get_intel_summary(services.intel, user_id=user_id, max_chars=1400)
+        if not text:
+            logger.info("INTEL_FETCH_FAIL reason=empty_intel_summary")
             return ""
-        compact = {
-            "daily_brief": str(data.get("daily_brief") or "").strip(),
-            "insights": data.get("insights") or [],
-            "count": data.get("count", 0),
-        }
-        text = json.dumps(compact, ensure_ascii=False)
-        if len(text) > 1400:
-            text = text[:1400]
         logger.info("INTEL_FETCH_SUCCESS chars=%s", len(text))
         return text
     except Exception as exc:
@@ -98,7 +85,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     )
     long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
     long_memory_text = long_memory_ctx.as_text()
-    intel_data = get_latest_intel()
+    intel_data = get_latest_intel(services, user_id=user_id)
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
     if long_memory_text:
         memory_hits += len(long_memory_ctx.conversation_hits) + len(long_memory_ctx.event_hits)

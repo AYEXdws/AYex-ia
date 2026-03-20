@@ -265,3 +265,19 @@ class IntelService:
         text = f"Intel brief fallback ({reason}):\n" + "\n".join(bullets)
         logger.info("DAILY_BRIEF_CREATED source=fallback length=%s", len(text))
         return text
+
+
+def get_intel_summary(service: IntelService, *, user_id: str = "default", max_chars: int = 1400) -> str:
+    """Build a compact intel summary string for prompt injection."""
+    data = service.get_daily_brief(user_id=user_id)
+    if not isinstance(data, dict):
+        return ""
+    compact = {
+        "daily_brief": str(data.get("daily_brief") or "").strip(),
+        "insights": data.get("insights") or [],
+        "count": data.get("count", 0),
+    }
+    text = json.dumps(compact, ensure_ascii=False)
+    if len(text) > max_chars:
+        text = text[:max_chars]
+    return text
