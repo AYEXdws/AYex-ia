@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from backend.src.intel.intel_service import build_intel_context, get_intel_summary
+from backend.src.intel.intel_service import build_intel_context, get_intel_summary, select_relevant_intel_context
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
@@ -200,6 +201,137 @@ def is_intel_query(text: str) -> bool:
         r"\bris(k|k)\b",
     )
     return any(re.search(p, low) for p in analysis_patterns)
+
+
+_HIGH_SIGNAL_KEYWORDS = [
+    "ne oluyor",
+    "durum ne",
+    "analiz",
+    "gelisme",
+    "neden",
+    "etki",
+    "risk",
+    "firsat",
+    "piyasa",
+    "gundem",
+    "olay",
+    "son durum",
+]
+
+
+def _recent_high_importance_exists(events: list) -> bool:
+    recent = sorted(
+        events,
+        key=lambda ev: getattr(ev, "timestamp", None) or datetime.min,
+        reverse=True,
+    )[:8]
+    for ev in recent:
+        importance = int(getattr(ev, "importance", 0) or 0)
+        source = _normalize_text(str(getattr(ev, "source", "") or ""))
+        if importance >= 8 and source != "seed":
+            return True
+    return False
+
+
+def should_use_intel(text: str, events: list) -> bool:
+    if not events:
+        return False
+    if is_intel_query(text):
+        return True
+    low = _normalize_text(text)
+    if any(k in low for k in _HIGH_SIGNAL_KEYWORDS):
+        return True
+    if _recent_high_importance_exists(events):
+        return True
+    return False
+
+
+def _intel_mode_reason(text: str, events: list) -> str:
+    if not events:
+        return "no_events"
+    if is_intel_query(text):
+        return "intel_query"
+    low = _normalize_text(text)
+    if any(k in low for k in _HIGH_SIGNAL_KEYWORDS):
+        return "high_signal_keyword"
+    if _recent_high_importance_exists(events):
+        return "high_importance_recent_event"
+    return "off"
+
+
+def _merge_hybrid_events(relevant_events: list[dict], global_events: list[dict], limit: int = 5) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for item in list(relevant_events) + list(global_events):
+        title = str(item.get("title") or "").strip()
+        norm = _normalize_text(title)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        merged.append(item)
+        if len(merged) >= limit:
+            break
+    return merged
+
+
+def _build_hybrid_intel_context(services: BackendServices, *, user_id: str, query: str) -> dict[str, Any]:
+    relevant = select_relevant_intel_context(services.intel, query, user_id=user_id, max_events=5)
+    global_ctx = build_intel_context(services.intel, user_id=user_id, max_events=5)
+    relevant_events = list(relevant.get("key_events") or [])
+    global_top2 = list(global_ctx.get("key_events") or [])[:2]
+    final_events = _merge_hybrid_events(relevant_events, global_top2, limit=5)
+
+    signals = list(relevant.get("signals") or [])
+    for sig in global_ctx.get("signals") or []:
+        if sig not in signals:
+            signals.append(sig)
+        if len(signals) >= 8:
+            break
+
+    if final_events:
+        summary = " | ".join(
+            [
+                f"{str(ev.get('title') or '')} (score:{float(ev.get('effective_score') or ev.get('score') or 0.0):.2f})"
+                for ev in final_events[:3]
+            ]
+        )
+    else:
+        summary = str(relevant.get("summary") or global_ctx.get("summary") or "").strip()
+
+    confidence = 0.0
+    if final_events:
+        confidence = sum(float(ev.get("effective_score") or ev.get("score") or 0.0) for ev in final_events) / float(
+            len(final_events)
+        )
+        confidence = max(0.0, min(1.0, confidence))
+
+    return {
+        "key_events": final_events,
+        "summary": summary[:900],
+        "signals": signals[:8],
+        "confidence": round(confidence, 4),
+        "recency_note": str(relevant.get("recency_note") or global_ctx.get("recency_note") or ""),
+        "query_focus": relevant.get("query_focus") or {},
+    }
+
+
+def _build_intel_injection_text(intel_context: dict[str, Any], compact_summary: str, max_chars: int = 2000) -> str:
+    events = intel_context.get("key_events") or []
+    event_lines: list[str] = []
+    for item in events[:5]:
+        title = str(item.get("title") or "").strip()
+        summary = str(item.get("summary") or "").strip()[:140]
+        event_lines.append(f"- {title}: {summary}")
+    if not event_lines:
+        event_lines = ["- Yuksek oncelikli olay bulunamadi."]
+    block = (
+        "INTEL_CONTEXT:\n"
+        "- Key Events:\n"
+        + "\n".join(event_lines)
+        + "\n\nINTEL_SUMMARY:\n"
+        + (compact_summary or "Yeterli intel ozeti yok.")
+    )
+    return block[:max_chars]
 
 
 def validate_response(text: str) -> bool:
@@ -510,34 +642,21 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
     long_memory_text = long_memory_ctx.as_text()
     stored_events = services.intel.store.get_all_events()
-    has_intel_events = len(stored_events) > 0
-    # V2 test mode: force intel pipeline on when intel exists, even for low-relevance queries.
-    intel_mode = has_intel_events or is_intel_query(text)
-    logger.info("INTEL_MODE=%s", "on" if intel_mode else "off")
+    mode_reason = _intel_mode_reason(text, stored_events)
+    intel_mode = should_use_intel(text, stored_events)
+    logger.info("INTEL_MODE=%s reason=%s", "on" if intel_mode else "off", mode_reason)
     intel_context: dict[str, Any] = {}
     intel_data = ""
     user_focus = "general"
+    injected_event_count = 0
     if intel_mode:
-        intel_context = build_intel_context(services.intel, user_id=user_id, max_events=5)
-        compact_intel = get_intel_summary(services.intel, user_id=user_id, max_chars=1400)
+        intel_context = _build_hybrid_intel_context(services, user_id=user_id, query=text)
+        compact_intel = get_intel_summary(services.intel, user_id=user_id, max_chars=1000)
         selected_events = intel_context.get("key_events") or []
-        if selected_events:
-            logger.info(
-                "INTEL_FETCH_SUCCESS source=internal event_count=%s",
-                len(selected_events),
-            )
-            intel_data = format_intel_for_prompt(intel_context, relevant=False)
-            if compact_intel:
-                intel_data = f"{intel_data}\n\nINTEL OZET:\n{compact_intel}"[:2600]
-            logger.info(
-                "INTEL_INJECTED event_count=%s summary_chars=%s",
-                len(selected_events),
-                len(compact_intel),
-            )
-        else:
-            logger.info("INTEL_FETCH_SUCCESS source=internal event_count=0")
-            intel_data = "ISTIHBARAT VERISI:\n- Temel Olaylar:\nYuksek oncelikli olay yok."
-            logger.info("INTEL_INJECTED event_count=0 summary_chars=0")
+        injected_event_count = len(selected_events)
+        logger.info("INTEL_FETCH_SUCCESS count=%s", injected_event_count)
+        intel_data = _build_intel_injection_text(intel_context, compact_intel, max_chars=2000)
+        logger.info("INTEL_INJECTED count=%s chars=%s", injected_event_count, len(intel_data))
         user_focus = extract_user_focus(services, session.id, text)
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
     if long_memory_text:
@@ -613,14 +732,19 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
 
     reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
     final_response_mode = "llm"
+    model_used_intel = False
+    fallback_used_intel = False
     used_intel = False
     if intel_mode:
         reply = normalize_intel_response(reply)
-        used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
-        logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
+        model_used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
+        if model_used_intel and injected_event_count > 0:
+            logger.info("INTEL_USED_TRUE reason=model")
+        else:
+            logger.info("INTEL_USED_FALSE reason=%s", intel_reason)
         is_valid, validation_reason = validate_response_detailed(reply)
-        if not is_valid or not used_intel:
-            reason_type = "intel_missing" if not used_intel else validation_reason
+        if not is_valid or not model_used_intel:
+            reason_type = "intel_missing" if not model_used_intel else validation_reason
             logger.info("RESPONSE_REJECTED_GENERIC reason=%s", reason_type)
             retry_profile_context = (
                 f"{profile_context_for_model}\n\n"
@@ -653,20 +777,24 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             if retry_reply:
                 reply = normalize_intel_response(retry_reply)
                 result = retry_result
-            used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
+            model_used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
             is_valid, validation_reason = validate_response_detailed(reply)
-            logger.info("INTEL_USED_%s reason=%s", "TRUE" if used_intel else "FALSE", intel_reason)
-            if is_valid and used_intel:
+            if model_used_intel and injected_event_count > 0:
+                logger.info("INTEL_USED_TRUE reason=model")
+            else:
+                logger.info("INTEL_USED_FALSE reason=%s", intel_reason)
+            if is_valid and model_used_intel:
                 final_response_mode = "regen"
-            if not is_valid or not used_intel:
+            if not is_valid or not model_used_intel:
                 logger.info("REGEN_VALIDATION_FAILED reason=%s", validation_reason if not is_valid else intel_reason)
                 logger.info("RESPONSE_REJECTED_AFTER_REGEN reason=%s", validation_reason if not is_valid else intel_reason)
                 reply = build_safe_fallback_response(intel_context, text)
-                if intel_context.get("key_events"):
-                    used_intel = True
-                    logger.info("INTEL_USED_TRUE reason=fallback_context_applied")
+                if injected_event_count > 0:
+                    fallback_used_intel = True
+                    logger.info("INTEL_USED_TRUE reason=fallback")
                 logger.info("SAFE_FALLBACK_USED")
                 final_response_mode = "fallback"
+        used_intel = bool(injected_event_count > 0 and (model_used_intel or fallback_used_intel))
     logger.info("FINAL_RESPONSE_MODE=%s", final_response_mode)
     response_scores = score_response(reply)
 
