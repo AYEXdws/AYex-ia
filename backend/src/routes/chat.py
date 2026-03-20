@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from backend.src.intel.intel_service import build_intel_context, select_relevant_intel_context
+from backend.src.intel.intel_service import build_intel_context, get_intel_summary
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
@@ -509,34 +509,35 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     )
     long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
     long_memory_text = long_memory_ctx.as_text()
-    intel_mode = is_intel_query(text)
+    stored_events = services.intel.store.get_all_events()
+    has_intel_events = len(stored_events) > 0
+    # V2 test mode: force intel pipeline on when intel exists, even for low-relevance queries.
+    intel_mode = has_intel_events or is_intel_query(text)
     logger.info("INTEL_MODE=%s", "on" if intel_mode else "off")
     intel_context: dict[str, Any] = {}
     intel_data = ""
     user_focus = "general"
     if intel_mode:
-        short_query = _normalize_text(text)[:120]
-        intel_context = select_relevant_intel_context(services.intel, text, user_id=user_id, max_events=5)
-        query_focus = intel_context.get("query_focus") or {}
-        logger.info(
-            "QUERY_TOPICS_EXTRACTED query=%s topics=%s",
-            short_query,
-            ",".join([str(t) for t in (query_focus.get("topics") or [])]) or "none",
-        )
+        intel_context = build_intel_context(services.intel, user_id=user_id, max_events=5)
+        compact_intel = get_intel_summary(services.intel, user_id=user_id, max_chars=1400)
         selected_events = intel_context.get("key_events") or []
         if selected_events:
-            top_titles = [str(x.get("title") or "")[:48] for x in selected_events[:3]]
             logger.info(
-                "RELEVANT_INTEL_SELECTED query=%s selected_count=%s top_titles=%s",
-                short_query,
+                "INTEL_FETCH_SUCCESS source=internal event_count=%s",
                 len(selected_events),
-                " | ".join(top_titles),
             )
-            intel_data = format_intel_for_prompt(intel_context, relevant=True)
+            intel_data = format_intel_for_prompt(intel_context, relevant=False)
+            if compact_intel:
+                intel_data = f"{intel_data}\n\nINTEL OZET:\n{compact_intel}"[:2600]
+            logger.info(
+                "INTEL_INJECTED event_count=%s summary_chars=%s",
+                len(selected_events),
+                len(compact_intel),
+            )
         else:
-            logger.info("RELEVANT_INTEL_EMPTY_FALLBACK_GLOBAL query=%s", short_query)
-            intel_context = get_latest_intel(services, user_id=user_id)
-            intel_data = format_intel_for_prompt(intel_context, relevant=False) if intel_context else ""
+            logger.info("INTEL_FETCH_SUCCESS source=internal event_count=0")
+            intel_data = "ISTIHBARAT VERISI:\n- Temel Olaylar:\nYuksek oncelikli olay yok."
+            logger.info("INTEL_INJECTED event_count=0 summary_chars=0")
         user_focus = extract_user_focus(services, session.id, text)
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
     if long_memory_text:
@@ -573,6 +574,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             "Zorunlu kurallar:\n"
             "- Yanit Turkce olacak, dogal ve net olacak.\n"
             "- Secilen olay/sinyalleri ad veya kavram seviyesinde acikca referansla.\n"
+            "- Cevapta en az bir olay basligini aynen yaz (ornek: 'Auth test event').\n"
             "- Neden-sonuc zinciri kur: 'bu nedenle', 'sonucunda', 'tetikler' gibi acik baglantilar kullan.\n"
             "- Kisa vadeli etkileri belirt (onumuzdeki 24-48 saat / kisa vade).\n"
             "- Bos, genel, ezber cümle kullanma.\n"
@@ -660,6 +662,9 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
                 logger.info("REGEN_VALIDATION_FAILED reason=%s", validation_reason if not is_valid else intel_reason)
                 logger.info("RESPONSE_REJECTED_AFTER_REGEN reason=%s", validation_reason if not is_valid else intel_reason)
                 reply = build_safe_fallback_response(intel_context, text)
+                if intel_context.get("key_events"):
+                    used_intel = True
+                    logger.info("INTEL_USED_TRUE reason=fallback_context_applied")
                 logger.info("SAFE_FALLBACK_USED")
                 final_response_mode = "fallback"
     logger.info("FINAL_RESPONSE_MODE=%s", final_response_mode)
