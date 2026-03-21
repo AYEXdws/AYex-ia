@@ -23,7 +23,7 @@ class IntelStore:
 
     def add_event(self, event: IntelEvent) -> IntelEvent | None:
         with self._lock:
-            if self._is_duplicate_title(event.title):
+            if self._is_duplicate_title(event.title, incoming_event=event):
                 return None
             self._events.append(event)
             self._persist_to_disk()
@@ -57,11 +57,21 @@ class IntelStore:
                 return datetime.min
         return ts
 
-    def _is_duplicate_title(self, title: str) -> bool:
+    def _is_duplicate_title(self, title: str, incoming_event: IntelEvent | None = None) -> bool:
         normalized = (title or "").strip().lower()
         if not normalized:
             return True
         recent = self._events[-20:]
+        if incoming_event is not None and self._is_market_like(incoming_event):
+            now_utc = datetime.utcnow()
+            recent = []
+            for ev in self._events:
+                ev_ts = self._normalize_sort_timestamp(getattr(ev, "timestamp", None))
+                if ev_ts == datetime.min:
+                    continue
+                age_seconds = (now_utc - ev_ts).total_seconds()
+                if 0.0 <= age_seconds <= 3600.0:
+                    recent.append(ev)
         for ev in recent:
             existing = (ev.title or "").strip().lower()
             if not existing:
@@ -70,6 +80,12 @@ class IntelStore:
             if ratio > 90.0:
                 return True
         return False
+
+    def _is_market_like(self, event: IntelEvent) -> bool:
+        category = str(getattr(event, "category", "") or "").strip().lower()
+        source_type = str(getattr(event, "source_type", "") or "").strip().lower()
+        source = str(getattr(event, "source", "") or "").strip().lower()
+        return category == "economy" or source_type == "market_api" or source == "market_api"
 
     def _load_from_disk(self) -> None:
         if self._persist_path is None:
