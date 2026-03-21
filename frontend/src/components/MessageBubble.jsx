@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
 
 export default function MessageBubble({ role, text, meta }) {
   const isUser = role === 'user';
@@ -17,7 +18,9 @@ export default function MessageBubble({ role, text, meta }) {
             : 'border-violet-300/35 bg-violet-500/10 text-slate-100 shadow-violet'
         ].join(' ')}
       >
-        <p className="whitespace-pre-wrap">{text}</p>
+        <div className="message-content whitespace-pre-wrap">
+          <ReactMarkdown>{text}</ReactMarkdown>
+        </div>
         {meta ? (
           <div className="mt-2 text-[11px] uppercase tracking-[0.12em] text-slate-300/80">{meta}</div>
         ) : null}
