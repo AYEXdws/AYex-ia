@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from typing import Callable
 
 from backend.src.intel.event_model import IntelEvent
 from backend.src.intel.intel_store import IntelStore
@@ -154,9 +155,10 @@ def _is_noise_event(event: IntelEvent) -> bool:
 
 
 class IntelService:
-    def __init__(self, store: IntelStore, openai_client=None):
+    def __init__(self, store: IntelStore, openai_client=None, profile_loader: Callable[[], dict] | None = None):
         self.store = store
         self.openai_client = openai_client
+        self.profile_loader = profile_loader
 
     def get_latest_events(self, limit: int = 10) -> list[IntelEvent]:
         return self.store.get_latest_events(limit=limit)
@@ -350,10 +352,110 @@ class IntelService:
             return False
         return True
 
-    def filter_by_user_profile(self, events: list[IntelEvent], user_id: str) -> list[IntelEvent]:
-        # Placeholder for future user-specific category/interest filtering.
+    def filter_by_user_profile(
+        self,
+        events: list[IntelEvent],
+        user_id: str,
+        *,
+        limit: int = 10,
+        profile: dict | None = None,
+    ) -> list[IntelEvent]:
+        """
+        Profile-aware relevance scoring:
+        - category match: +0.3
+        - matching tags: +0.2 each (max +0.4)
+        - topic keyword match in title+summary: +0.3
+        - freshness (<6h): +0.1
+        - drop events with relevance <0.2
+        Final rank = (original_importance_score * 0.6) + (relevance_score * 0.4)
+        """
         _ = user_id
-        return list(events)
+        rows = list(events or [])
+        if not rows:
+            return []
+        safe_limit = max(1, min(100, int(limit or 10)))
+
+        def _as_keyword_set(value) -> set[str]:
+            out: set[str] = set()
+            if isinstance(value, str):
+                norm = _normalize_text(value).strip()
+                if norm:
+                    out.add(norm)
+                out |= _tokenize(norm)
+                return out
+            if isinstance(value, (list, tuple, set)):
+                for item in value:
+                    out |= _as_keyword_set(item)
+                return out
+            return out
+
+        profile_data: dict = {}
+        if isinstance(profile, dict):
+            profile_data = profile
+        elif callable(self.profile_loader):
+            try:
+                loaded = self.profile_loader()
+                if isinstance(loaded, dict):
+                    profile_data = loaded
+            except Exception as exc:
+                logger.info("PROFILE_LOAD_FAIL reason=%s", exc)
+                profile_data = {}
+
+        preferred_categories = _as_keyword_set(profile_data.get("preferred_categories") or profile_data.get("categories") or [])
+        interests = _as_keyword_set(profile_data.get("interests") or profile_data.get("preferences") or [])
+        topics = _as_keyword_set(profile_data.get("topics") or profile_data.get("focus_projects") or [])
+
+        has_profile_preferences = bool(preferred_categories or interests or topics)
+
+        def _original_importance_score(event: IntelEvent) -> float:
+            raw = float(getattr(event, "importance_score", 0.0) or 0.0)
+            if raw <= 0.0:
+                raw = max(0.0, min(1.0, float(getattr(event, "importance", 0) or 0.0) / 10.0))
+            return max(0.0, min(1.0, raw))
+
+        if not has_profile_preferences:
+            ordered = sorted(rows, key=_original_importance_score, reverse=True)
+            return ordered[:safe_limit]
+
+        now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+        ranked: list[tuple[float, float, float, IntelEvent]] = []
+        for event in rows:
+            relevance = 0.0
+            category_norm = _normalize_text(str(getattr(event, "category", "") or "")).strip()
+            if category_norm and category_norm in preferred_categories:
+                relevance += 0.3
+
+            tags = list(getattr(event, "tags", []) or [])
+            tag_match_count = 0
+            for tag in tags:
+                tag_norm = _normalize_text(str(tag or "")).strip()
+                if tag_norm and tag_norm in interests:
+                    tag_match_count += 1
+            relevance += min(0.4, float(tag_match_count) * 0.2)
+
+            blob = _normalize_text(
+                f"{str(getattr(event, 'title', '') or '')} {str(getattr(event, 'summary', '') or '')}"
+            )
+            if topics and any(topic in blob for topic in topics):
+                relevance += 0.3
+
+            ts = getattr(event, "timestamp", None)
+            if isinstance(ts, datetime):
+                event_utc = ts.astimezone(timezone.utc) if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+                age_hours = (now_utc - event_utc).total_seconds() / 3600.0
+                if 0.0 <= age_hours < 6.0:
+                    relevance += 0.1
+
+            relevance = max(0.0, min(1.0, relevance))
+            if relevance < 0.2:
+                continue
+
+            original_score = _original_importance_score(event)
+            final_rank = (original_score * 0.6) + (relevance * 0.4)
+            ranked.append((final_rank, original_score, relevance, event))
+
+        ranked.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+        return [item[3] for item in ranked[:safe_limit]]
 
     def build_insight(self, event: IntelEvent, analysis: dict) -> dict:
         return {
@@ -395,8 +497,7 @@ class IntelService:
 
     def get_daily_brief(self, user_id: str = "default") -> dict:
         events = self.store.get_all_events()
-        scored = sorted(events, key=lambda e: float(e.final_score), reverse=True)
-        user_filtered = self.filter_by_user_profile(scored, user_id=user_id)
+        user_filtered = self.filter_by_user_profile(events, user_id=user_id, limit=10)
         filtered = [e for e in user_filtered if self.should_analyze(e)]
         filtered_out_count = max(0, len(user_filtered) - len(filtered))
         logger.info("FILTERED_OUT_COUNT value=%s", filtered_out_count)
