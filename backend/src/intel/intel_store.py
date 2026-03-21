@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from difflib import SequenceMatcher
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import threading
 
@@ -25,6 +25,7 @@ class IntelStore:
                 self._load_from_disk()
             else:
                 self._persist_path.write_text("[]", encoding="utf-8")
+            self._restore_from_archive_if_empty()
 
     def add_event(self, event: IntelEvent) -> IntelEvent | None:
         with self._lock:
@@ -110,31 +111,75 @@ class IntelStore:
         for item in raw:
             if not isinstance(item, dict):
                 continue
-            ts_raw = item.get("timestamp")
-            ts = datetime.utcnow()
-            if isinstance(ts_raw, str) and ts_raw.strip():
-                try:
-                    ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-                except ValueError:
-                    ts = datetime.utcnow()
-            event_kwargs = {
-                "title": str(item.get("title") or ""),
-                "summary": str(item.get("summary") or ""),
-                "category": str(item.get("category") or "other"),
-                "importance": max(1, min(10, int(item.get("importance", 5) or 5))),
-                "timestamp": ts,
-                "source": str(item.get("source") or "internal"),
-                "tags": [str(x) for x in (item.get("tags") or []) if str(x).strip()],
-                "importance_score": float(item.get("importance_score", 0.0) or 0.0),
-                "urgency_score": float(item.get("urgency_score", 0.0) or 0.0),
-                "confidence_score": float(item.get("confidence_score", 0.0) or 0.0),
-                "final_score": float(item.get("final_score", 0.0) or 0.0),
-            }
-            event_id = str(item.get("id") or "").strip()
-            if event_id:
-                event_kwargs["id"] = event_id
-            loaded.append(IntelEvent(**event_kwargs))
+            loaded.append(self._event_from_dict(item))
         self._events = loaded
+
+    def _restore_from_archive_if_empty(self) -> None:
+        if self._events:
+            return
+        today = datetime.utcnow().date()
+        candidate_days = [today, today - timedelta(days=1)]
+        for day in candidate_days:
+            day_str = day.isoformat()
+            restored = self._load_archive_day(day_str)
+            if not restored:
+                continue
+            self._events = restored
+            self._persist_to_disk()
+            logger.info("INTEL_STORE_RESTORED_FROM_ARCHIVE date=%s count=%s", day_str, len(restored))
+            return
+
+    def _load_archive_day(self, date_str: str) -> list[IntelEvent]:
+        if self.archive is not None:
+            try:
+                restored = list(self.archive.get_events_by_date(date_str) or [])
+                return restored
+            except Exception as exc:
+                logger.info("INTEL_ARCHIVE_RESTORE_FAIL date=%s error=%s", date_str, exc)
+                return []
+        if self._persist_path is None:
+            return []
+        archive_path = self._persist_path.parent / "archive" / f"{date_str}.json"
+        if not archive_path.exists():
+            return []
+        try:
+            raw = json.loads(archive_path.read_text(encoding="utf-8"))
+        except Exception:
+            raw = []
+        if not isinstance(raw, list):
+            return []
+        out: list[IntelEvent] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            out.append(self._event_from_dict(item))
+        return out
+
+    def _event_from_dict(self, item: dict) -> IntelEvent:
+        ts_raw = item.get("timestamp")
+        ts = datetime.utcnow()
+        if isinstance(ts_raw, str) and ts_raw.strip():
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+            except ValueError:
+                ts = datetime.utcnow()
+        event_kwargs = {
+            "title": str(item.get("title") or ""),
+            "summary": str(item.get("summary") or ""),
+            "category": str(item.get("category") or "other"),
+            "importance": max(1, min(10, int(item.get("importance", 5) or 5))),
+            "timestamp": ts,
+            "source": str(item.get("source") or "internal"),
+            "tags": [str(x) for x in (item.get("tags") or []) if str(x).strip()],
+            "importance_score": float(item.get("importance_score", 0.0) or 0.0),
+            "urgency_score": float(item.get("urgency_score", 0.0) or 0.0),
+            "confidence_score": float(item.get("confidence_score", 0.0) or 0.0),
+            "final_score": float(item.get("final_score", 0.0) or 0.0),
+        }
+        event_id = str(item.get("id") or "").strip()
+        if event_id:
+            event_kwargs["id"] = event_id
+        return IntelEvent(**event_kwargs)
 
     def _persist_to_disk(self) -> None:
         if self._persist_path is None:
