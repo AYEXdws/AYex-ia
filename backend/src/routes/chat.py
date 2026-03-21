@@ -224,6 +224,22 @@ def is_intel_query(text: str) -> bool:
         ("market", "crypto", "kripto", "btc", "eth", "altcoin", "finance", "finans", "fed", "faiz", "enflasyon"),
         ("security", "guvenlik", "breach", "hack", "sizinti", "ihlal", "exploit", "ransomware"),
         ("macro", "makro", "geopolit", "jeopolitik", "sinyal", "risk", "impact", "etki", "senaryo"),
+        (
+            "dunyada",
+            "dunya",
+            "neler oldu",
+            "haberler",
+            "gundem",
+            "bugun ne",
+            "son dakika",
+            "gelismeler",
+            "piyasalar",
+            "ekonomi",
+            "kripto",
+            "siber",
+            "guvenlik",
+            "saldiri",
+        ),
     )
     if any(k in low for group in keyword_groups for k in group):
         return True
@@ -243,6 +259,22 @@ def is_intel_query(text: str) -> bool:
         r"\bris(k|k)\b",
     )
     return any(re.search(p, low) for p in analysis_patterns)
+
+
+def is_general_news_query(text: str) -> bool:
+    low = _normalize_text(text)
+    news_triggers = (
+        "dunyada",
+        "dunya",
+        "neler oldu",
+        "haberler",
+        "gundem",
+        "bugun ne",
+        "son dakika",
+        "gelismeler",
+        "piyasalar",
+    )
+    return any(token in low for token in news_triggers)
 
 
 def detect_tone(user_message: str) -> str:
@@ -611,8 +643,11 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
     long_memory_text = long_memory_ctx.as_text()
     latest_events = services.intel.get_latest_events(limit=10)
-    logger.info("CHAT_LATEST_EVENTS count=%s", len(latest_events))
-    intel_query = is_intel_query(text)
+    latest_event_count = len(latest_events)
+    logger.info("CHAT_LATEST_EVENTS count=%s", latest_event_count)
+    general_news_query = is_general_news_query(text)
+    aggressive_news_mode = bool(general_news_query and latest_event_count > 0)
+    intel_query = bool(is_intel_query(text) or aggressive_news_mode)
     relevant_intel_context: dict[str, Any] = {}
     if intel_query:
         try:
@@ -625,10 +660,15 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         except Exception as exc:
             logger.info("CHAT_INTEL_SELECT_ERROR error=%s", exc)
             relevant_intel_context = {}
+    if aggressive_news_mode and not (relevant_intel_context.get("key_events") or []) and latest_event_count > 0:
+        relevant_intel_context = _build_intel_context_from_events(latest_events)
+        logger.info("CHAT_INTEL_FALLBACK source=latest_events reason=general_news_query")
     relevant_events = relevant_intel_context.get("key_events") or []
     intel_mode = bool(intel_query and relevant_events)
     if not intel_query:
         mode_reason = "query_not_intel"
+    elif aggressive_news_mode and relevant_events:
+        mode_reason = "general_news_with_latest_events"
     elif not relevant_events:
         mode_reason = "no_relevant_events"
         logger.info("CHAT_INTEL_SELECTED count=0 titles=none")
