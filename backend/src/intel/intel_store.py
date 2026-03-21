@@ -6,13 +6,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 import threading
 
+from backend.src.intel.intel_archive import IntelArchive
 from backend.src.intel.event_model import IntelEvent
+from backend.src.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class IntelStore:
-    def __init__(self, persist_path: str | Path | None = None):
+    def __init__(self, persist_path: str | Path | None = None, archive: IntelArchive | None = None):
         self._events: list[IntelEvent] = []
         self._lock = threading.Lock()
+        self.archive = archive
         self._persist_path: Path | None = Path(persist_path).expanduser().resolve() if persist_path else None
         if self._persist_path is not None:
             self._persist_path.parent.mkdir(parents=True, exist_ok=True)
@@ -27,6 +32,11 @@ class IntelStore:
                 return None
             self._events.append(event)
             self._persist_to_disk()
+            if self.archive is not None:
+                try:
+                    self.archive.archive_event(event)
+                except Exception as exc:
+                    logger.info("INTEL_ARCHIVE_WRITE_FAIL error=%s", exc)
             return event
 
     def get_all_events(self) -> list[IntelEvent]:

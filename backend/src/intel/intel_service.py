@@ -517,6 +517,42 @@ class IntelService:
             "generated_at": datetime.utcnow().isoformat(),
         }
 
+    def get_historical_comparison(self, query_text: str, category: str = None) -> str:
+        archive = getattr(self.store, "archive", None)
+        if archive is None:
+            return ""
+
+        q = _normalize_text(query_text)
+        wants_today = any(token in q for token in ("bugun", "today"))
+        wants_yesterday = any(token in q for token in ("dun", "yesterday"))
+        wants_compare = any(token in q for token in ("karsilastir", "compare", "versus", "vs"))
+        if not any((wants_today, wants_yesterday, wants_compare)):
+            return ""
+
+        today_events = list(archive.get_today_events() or [])
+        yesterday_events = list(archive.get_yesterday_events() or [])
+
+        category_norm = _normalize_text(str(category or "")).strip()
+        if category_norm:
+            today_events = [e for e in today_events if _normalize_text(str(e.category or "")).strip() == category_norm]
+            yesterday_events = [e for e in yesterday_events if _normalize_text(str(e.category or "")).strip() == category_norm]
+
+        if wants_compare or (wants_today and wants_yesterday):
+            return build_comparison_block(yesterday_events, today_events)
+
+        target = today_events if wants_today else yesterday_events
+        label = "BUGÜN" if wants_today else "DÜN"
+        if not target:
+            return f"{label} ARŞİVİ:\n- Uygun olay bulunamadı."
+
+        lines: list[str] = []
+        for event in target[:4]:
+            ts = getattr(event, "timestamp", datetime.utcnow())
+            ts_utc = ts.astimezone(timezone.utc) if getattr(ts, "tzinfo", None) is not None else ts
+            ts_text = ts_utc.strftime("%Y-%m-%d %H:%M")
+            lines.append(f"- [{ts_text}] {event.title}: {str(event.summary or '')[:160]}")
+        return f"{label} ARŞİVİ:\n" + "\n".join(lines)
+
     def _parse_analysis_json(self, text: str) -> dict | None:
         raw = (text or "").strip()
         if not raw:
@@ -696,6 +732,13 @@ def select_relevant_intel_context(
             scoped = list(timeframe_selection.get("events") or [])
             filtered = scoped
             logger.info("INTEL_TIMEFRAME mode=single count=%s", len(scoped))
+    category_hint = next(iter(query_categories), None) if len(query_categories) == 1 else None
+    historical_block = service.get_historical_comparison(query, category=category_hint)
+    if historical_block:
+        if comparison_block:
+            comparison_block = f"{historical_block}\n\n{comparison_block}"
+        else:
+            comparison_block = historical_block
     timeframe_active = timeframe_mode != "none"
     ranked: list[tuple[float, float, float, float, str, IntelEvent]] = []
 

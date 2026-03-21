@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from backend.src.config.env import BackendSettings, load_settings
+from backend.src.intel.intel_archive import IntelArchive
 from backend.src.intel.intel_service import IntelService
 from backend.src.intel.intel_store import IntelStore
 from backend.src.memory.manager import MemoryManager
@@ -81,7 +82,8 @@ def build_services() -> BackendServices:
     long_memory = LongMemoryService(settings)
     long_memory.sync_profile(profile.load())
     agent_mode = AgentModeService(openclaw=openclaw, tools=tools)
-    intel_store = IntelStore(persist_path=Path(settings.data_dir) / "intel_events.json")
+    intel_archive = IntelArchive(data_dir=Path(settings.data_dir))
+    intel_store = IntelStore(persist_path=Path(settings.data_dir) / "intel_events.json", archive=intel_archive)
     intel = IntelService(intel_store, openai_client=openclaw.openai, profile_loader=profile.load)
     _seed_intel(intel)
     cost_guard = CostGuardService(settings)
