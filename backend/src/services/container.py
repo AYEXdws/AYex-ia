@@ -8,7 +8,6 @@ from backend.src.config.env import BackendSettings, load_settings
 from backend.src.intel.intel_archive import IntelArchive
 from backend.src.intel.intel_service import IntelService
 from backend.src.intel.intel_store import IntelStore
-from backend.src.memory.manager import MemoryManager
 from backend.src.services.agent_mode import AgentModeService
 from backend.src.services.agent_registry import AgentRegistry
 from backend.src.services.auth_service import AuthService
@@ -16,6 +15,7 @@ from backend.src.services.chat_store import ChatStore
 from backend.src.services.cost_guard import CostGuardService
 from backend.src.services.intent_router import IntentRouter
 from backend.src.services.long_memory import LongMemoryService
+from backend.src.services.memory_summarizer import MemorySummarizer
 from backend.src.services.openclaw_service import OpenClawService
 from backend.src.services.profile_service import ProfileService
 from backend.src.services.response_style import ResponseStyleService
@@ -37,7 +37,7 @@ class BackendServices:
     stt: SpeechToTextService
     tts: TextToSpeechService
     intents: IntentRouter
-    memory: MemoryManager
+    memory: MemorySummarizer
     tools: ToolRouter
     voice: VoiceResponseService
     orchestrator: ResponseOrchestrator
@@ -70,7 +70,7 @@ def build_services() -> BackendServices:
     stt = SpeechToTextService(settings)
     tts = TextToSpeechService(settings)
     intents = IntentRouter()
-    memory = MemoryManager()
+    memory = MemorySummarizer(settings)
     tool_registry = ToolRegistry()
     tools = ToolRouter(registry=tool_registry)
     voice = VoiceResponseService()

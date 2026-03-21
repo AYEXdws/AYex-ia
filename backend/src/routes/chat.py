@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import re
+import threading
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -93,6 +95,26 @@ def _looks_turkish(text: str) -> bool:
     tr_hits = sum(1 for marker in turkish_markers if marker in f" {low} ")
     en_hits = sum(1 for marker in english_markers if marker in f" {low} ")
     return tr_hits >= 2 or en_hits <= 1
+
+
+def _schedule_memory_summary(services: BackendServices, messages: list[dict[str, Any]], session_id: str) -> None:
+    async def _runner() -> None:
+        try:
+            stored = services.memory.summarize_and_store(
+                messages=messages,
+                session_id=session_id,
+                openai_client=services.openclaw.openai,
+            )
+            if stored:
+                logger.info("MEMORY_SUMMARY_STORED session_id=%s memory_id=%s", session_id, str(stored.get("id") or ""))
+        except Exception as exc:
+            logger.info("MEMORY_SUMMARY_FAIL session_id=%s error=%s", session_id, exc)
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_runner())
+    except RuntimeError:
+        threading.Thread(target=lambda: asyncio.run(_runner()), daemon=True).start()
 
 
 def get_latest_intel(services: BackendServices, *, user_id: str = "default") -> dict[str, Any]:
@@ -571,6 +593,13 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
 
     history = services.chat_store.model_context(session.id, turns=services.settings.openclaw_context_turns)
     profile_data = services.profile.load()
+    summary_memory_context = ""
+    try:
+        summary_memory_context = services.memory.get_memory_context(text)
+        if summary_memory_context:
+            logger.info("MEMORY_SUMMARY_CONTEXT_USED chars=%s", len(summary_memory_context))
+    except Exception as exc:
+        logger.info("MEMORY_SUMMARY_CONTEXT_FAIL error=%s", exc)
     detected_tone = detect_tone(text)
     style_decision = services.style.detect(text, profile_style=str(profile_data.get("response_style") or ""))
     intent = services.intents.route(text)
@@ -629,6 +658,8 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
     if long_memory_text:
         memory_hits += len(long_memory_ctx.conversation_hits) + len(long_memory_ctx.event_hits)
+    if summary_memory_context:
+        memory_hits += max(1, summary_memory_context.count("\n"))
     if memory_hits > 0:
         logger.info("MEMORY_USED route=chat hits=%s", memory_hits)
 
@@ -646,6 +677,9 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     model_input = text
     if tool_context:
         model_input = f"Kullanici sorusu: {text}\n\nTool kaniti:\n{tool_context}"
+    profile_prompt_base = services.profile.prompt_context()
+    if summary_memory_context:
+        profile_prompt_base = f"{profile_prompt_base}\n\n{summary_memory_context}"
     if intel_mode:
         intel_block = intel_data if intel_data else "INTEL_CONTEXT:\n- Key Events:\n- Yuksek oncelikli olay yok.\n\nINTEL_SUMMARY:\nYeterli intel yok."
         intel_system_prompt = (
@@ -679,13 +713,13 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             "- Kısa vade etkisi belirt\n"
         )
         profile_context_for_model = (
-            f"{services.profile.prompt_context()}\n\n"
+            f"{profile_prompt_base}\n\n"
             f"Ahmet'in bu mesajdaki tonu: {detected_tone}. Buna göre cevapla.\n\n"
             f"{intel_system_prompt}"
         )
     else:
         profile_context_for_model = (
-            f"{services.profile.prompt_context()}\n\n"
+            f"{profile_prompt_base}\n\n"
             f"Ahmet'in bu mesajdaki tonu: {detected_tone}. Buna göre cevapla."
         )
 
@@ -831,6 +865,11 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         style=style_decision.style,
         user_id=user_id,
     )
+    if result.ok:
+        recent_messages = services.chat_store.messages(session.id, limit=80)
+        if len(recent_messages) >= 6:
+            logger.info("MEMORY_SUMMARY_TRIGGER session_id=%s message_count=%s", session.id, len(recent_messages))
+            _schedule_memory_summary(services, recent_messages, session.id)
 
     return ChatResponse(
         reply=reply,
