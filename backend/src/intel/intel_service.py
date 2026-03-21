@@ -681,6 +681,22 @@ def select_relevant_intel_context(
 
     events = service.store.get_all_events()
     filtered = service.filter_by_user_profile(events, user_id=user_id)
+    timeframe_selection = select_intel_by_timeframe(filtered, query)
+    comparison_block = ""
+    timeframe_mode = "none"
+    if isinstance(timeframe_selection, dict):
+        timeframe_mode = str(timeframe_selection.get("mode") or "single")
+        if timeframe_mode == "compare":
+            old_events = list(timeframe_selection.get("old_events") or [])
+            new_events = list(timeframe_selection.get("new_events") or [])
+            comparison_block = build_comparison_block(old_events, new_events)
+            filtered = old_events + new_events
+            logger.info("INTEL_TIMEFRAME mode=compare old=%s new=%s", len(old_events), len(new_events))
+        else:
+            scoped = list(timeframe_selection.get("events") or [])
+            filtered = scoped
+            logger.info("INTEL_TIMEFRAME mode=single count=%s", len(scoped))
+    timeframe_active = timeframe_mode != "none"
     ranked: list[tuple[float, float, float, float, str, IntelEvent]] = []
 
     for event in filtered:
@@ -704,10 +720,11 @@ def select_relevant_intel_context(
         query_match_score = min(1.0, (overlap_norm * 0.72) + (topic_hit * 0.28) + category_bias_boost)
 
         event_cat = _normalize_text(event.category)
-        if query_categories and event_cat not in query_categories and topic_hit <= 0.0 and overlap_raw <= 0.0:
-            continue
-        if query_tokens and query_match_score < 0.08:
-            continue
+        if not timeframe_active:
+            if query_categories and event_cat not in query_categories and topic_hit <= 0.0 and overlap_raw <= 0.0:
+                continue
+            if query_tokens and query_match_score < 0.08:
+                continue
 
         freshness_multiplier, time_window, freshness_bonus = _freshness_for_timestamp(event.timestamp)
         effective_relevance_score = (query_match_score * 0.60) + (float(event.final_score) * 0.25) + (freshness_bonus * 0.15)
@@ -777,7 +794,9 @@ def select_relevant_intel_context(
         if len(dedup_signals) >= 8:
             break
 
-    if key_events:
+    if comparison_block:
+        summary = comparison_block
+    elif key_events:
         topics_text = ", ".join(query_topics) if query_topics else "general"
         summary = " | ".join(
             [f"{item['title']} (q:{item['query_match_score']:.2f}, score:{item['effective_score']:.2f})" for item in key_events[:3]]
@@ -799,7 +818,133 @@ def select_relevant_intel_context(
         "confidence": round(confidence, 4),
         "recency_note": f"dominant_time_window={dominant_time_window}",
         "query_focus": query_info,
+        "timeframe_mode": timeframe_mode,
     }
+
+
+def select_intel_by_timeframe(events: list[IntelEvent], query_text: str) -> dict | None:
+    q = _normalize_text(query_text)
+
+    has_today = any(token in q for token in ("bugun", "today"))
+    has_yesterday = any(token in q for token in ("dun", "yesterday"))
+    has_this_week = any(token in q for token in ("bu hafta", "this week"))
+    has_last_week = any(token in q for token in ("gecen hafta", "last week"))
+    has_compare = any(token in q for token in ("karsilastir", "compare", "versus", "vs"))
+
+    if not any((has_today, has_yesterday, has_this_week, has_last_week, has_compare)):
+        return None
+
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+
+    def _events_in_age_window(min_hours: float, max_hours: float) -> list[IntelEvent]:
+        rows: list[tuple[datetime, IntelEvent]] = []
+        for event in list(events or []):
+            ts = getattr(event, "timestamp", None)
+            if not isinstance(ts, datetime):
+                continue
+            event_utc = ts.astimezone(timezone.utc) if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+            age_hours = (now_utc - event_utc).total_seconds() / 3600.0
+            if min_hours <= age_hours < max_hours:
+                rows.append((event_utc, event))
+        rows.sort(key=lambda x: x[0], reverse=True)
+        return [row[1] for row in rows]
+
+    if has_compare:
+        if has_this_week or has_last_week:
+            old_events = _events_in_age_window(24.0 * 7.0, 24.0 * 14.0)
+            new_events = _events_in_age_window(0.0, 24.0 * 7.0)
+        else:
+            old_events = _events_in_age_window(24.0, 48.0)
+            new_events = _events_in_age_window(0.0, 24.0)
+        return {
+            "mode": "compare",
+            "old_events": old_events,
+            "new_events": new_events,
+        }
+
+    if has_yesterday:
+        return {
+            "mode": "single",
+            "events": _events_in_age_window(24.0, 48.0),
+            "label": "yesterday",
+        }
+    if has_today:
+        return {
+            "mode": "single",
+            "events": _events_in_age_window(0.0, 24.0),
+            "label": "today",
+        }
+    if has_last_week:
+        return {
+            "mode": "single",
+            "events": _events_in_age_window(24.0 * 7.0, 24.0 * 14.0),
+            "label": "last_week",
+        }
+    return {
+        "mode": "single",
+        "events": _events_in_age_window(0.0, 24.0 * 7.0),
+        "label": "this_week",
+    }
+
+
+def build_comparison_block(old_events: list[IntelEvent], new_events: list[IntelEvent]) -> str:
+    def _period_date(events: list[IntelEvent]) -> str:
+        dated: list[datetime] = []
+        for event in events:
+            ts = getattr(event, "timestamp", None)
+            if not isinstance(ts, datetime):
+                continue
+            event_utc = ts.astimezone(timezone.utc) if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+            dated.append(event_utc)
+        if not dated:
+            return "veri yok"
+        return max(dated).date().isoformat()
+
+    def _event_lines(events: list[IntelEvent]) -> list[str]:
+        out: list[str] = []
+        for event in events[:3]:
+            title = str(getattr(event, "title", "") or "").strip() or "Baslik yok"
+            summary = str(getattr(event, "summary", "") or "").strip()[:160] or "Ozet yok"
+            out.append(f"- {title}: {summary}")
+        if not out:
+            out.append("- Bu donemde olay verisi yok.")
+        return out
+
+    old_titles = {
+        _normalize_text(str(getattr(event, "title", "") or "").strip())
+        for event in old_events
+        if str(getattr(event, "title", "") or "").strip()
+    }
+    new_titles = {
+        _normalize_text(str(getattr(event, "title", "") or "").strip())
+        for event in new_events
+        if str(getattr(event, "title", "") or "").strip()
+    }
+    added = sorted(list(new_titles - old_titles))
+    removed = sorted(list(old_titles - new_titles))
+    stable = sorted(list(new_titles & old_titles))
+
+    if added:
+        diff = f"Yeni donemde artan basliklar: {', '.join(added[:3])}."
+    elif removed:
+        diff = f"Onceki doneme gore zayiflayan basliklar: {', '.join(removed[:3])}."
+    elif stable:
+        diff = f"Benzer hat devam ediyor: {', '.join(stable[:3])}."
+    else:
+        diff = "Karsilastirma icin yeterli olay yok."
+
+    old_date = _period_date(old_events)
+    new_date = _period_date(new_events)
+    return (
+        "ZAMAN KARŞILAŞTIRMASI:\n\n"
+        f"[Önceki Dönem - {old_date}]\n"
+        + "\n".join(_event_lines(old_events))
+        + "\n\n"
+        f"[Güncel Dönem - {new_date}]\n"
+        + "\n".join(_event_lines(new_events))
+        + "\n\n"
+        f"Fark: {diff}"
+    )
 
 
 def summarize_intel_context(intel_context: dict, *, max_chars: int = 1000) -> str:

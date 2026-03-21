@@ -223,6 +223,17 @@ def is_intel_query(text: str) -> bool:
     return any(re.search(p, low) for p in analysis_patterns)
 
 
+def detect_tone(user_message: str) -> str:
+    msg = _normalize_text(user_message)
+    if any(w in msg for w in ("ne dusunursun", "sence", "bence", " ya ", " yani ", "haha", "neyse")):
+        return "casual"
+    if any(w in msg for w in ("acil", "dikkat", "kritik", "hemen", "simdi")):
+        return "urgent"
+    if any(w in msg for w in ("analiz", "karsilastir", "acikla", "neden", "nasil", "detay")):
+        return "analytical"
+    return "normal"
+
+
 def _build_intel_context_from_events(events: list[Any]) -> dict[str, Any]:
     key_events: list[dict[str, Any]] = []
     signals: list[str] = []
@@ -560,6 +571,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
 
     history = services.chat_store.model_context(session.id, turns=services.settings.openclaw_context_turns)
     profile_data = services.profile.load()
+    detected_tone = detect_tone(text)
     style_decision = services.style.detect(text, profile_style=str(profile_data.get("response_style") or ""))
     intent = services.intents.route(text)
     memory_context = services.chat_store.recall_context_text(
@@ -637,23 +649,45 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     if intel_mode:
         intel_block = intel_data if intel_data else "INTEL_CONTEXT:\n- Key Events:\n- Yuksek oncelikli olay yok.\n\nINTEL_SUMMARY:\nYeterli intel yok."
         intel_system_prompt = (
-            "Sen AYEX-IA'sın. Ahmet için çalışıyorsun.\n\n"
-            "Aşağıdaki istihbarat verisini Ahmet'e anlat — ham veri listeleme, anlam üret.\n\n"
+            "Sen AYEX — Ahmet'in sistemi. Asistan değil, ortak.\n\n"
+            "Ahmet hakkında bildiklerin:\n"
+            "- 17 yaşında, Amasya\n"
+            "- 12. sınıf, YKS süreci var\n"
+            "- AYEX-IA, HAL, MindBloom projelerini geliştiriyor\n"
+            "- Kripto, siber güvenlik, yapay zeka ilgi alanları\n"
+            "- Katmanlı düşünür, analitik, anlam bağımlısı\n"
+            "- Sert geri bildirim ister, yalakalık istemez\n\n"
+            "KONUŞMA TARZI — ZORUNLU:\n"
+            "- Ahmet ile dost gibi konuş. Danışman gibi değil.\n"
+            "- \"Şuna dikkat etmelisin\" değil → \"Ahmet, bu riskli\"\n"
+            "- \"Önerim şudur\" değil → \"Ben olsam şunu yapardım\"\n"
+            "- Belirsiz soruda önce netleştir: \"Hangi kripto? BTC mi?\"\n"
+            "- Liste yapma — düz, akıcı konuş\n"
+            "- Kısa soruda 2-3 cümle. Uzun analizde paragraf, sade\n"
+            "- Zaman zaman \"bence\", \"sence\", \"dur bir düşün\" kullan\n\n"
+            "ZAMAN FARKINDALIGI:\n"
+            "Aşağıdaki intel verisi zaman damgalı.\n"
+            "\"Dün\" / \"bugün\" / \"karşılaştır\" gibi ifadelerde\n"
+            "tarihleri kullanarak net karşılaştırma yap.\n\n"
             f"{intel_block}\n\n"
             f"Kullanıcı odağı: {user_focus}\n\n"
-            "KURALLAR:\n"
-            "- Türkçe yaz. Doğal, net, insan gibi.\n"
-            "- En az bir olay başlığını referans ver — \"X olayına göre...\" şeklinde.\n"
-            "- Neden-sonuç kur: \"bu nedenle\", \"sonucunda\", \"bu tetikler\" kullan.\n"
-            "- Kısa vade etkisi belirt (24-48 saat).\n"
-            "- Markdown başlığı kullanma (###, **, ## yok).\n"
-            "- Şu düz etiketleri kullan: Durum:, Neden önemli:, Risk/Fırsat:, Ne izlemeli:.\n"
-            "- Her bölüm kısa olsun (max 2-3 cümle).\n\n"
-            "- Dolgu yok. Ezber yok. Gereksiz \"genel bağlam\" yok.\n"
+            "ZORUNLU KURALLAR:\n"
+            "- Türkçe. Teknik terim İngilizce kalabilir.\n"
+            "- Markdown başlık yok (###, ** yok)\n"
+            "- Veriyi referans ver ama ham listeleme\n"
+            "- Neden-sonuç kur\n"
+            "- Kısa vade etkisi belirt\n"
         )
-        profile_context_for_model = f"{services.profile.prompt_context()}\n\n{intel_system_prompt}"
+        profile_context_for_model = (
+            f"{services.profile.prompt_context()}\n\n"
+            f"Ahmet'in bu mesajdaki tonu: {detected_tone}. Buna göre cevapla.\n\n"
+            f"{intel_system_prompt}"
+        )
     else:
-        profile_context_for_model = services.profile.prompt_context()
+        profile_context_for_model = (
+            f"{services.profile.prompt_context()}\n\n"
+            f"Ahmet'in bu mesajdaki tonu: {detected_tone}. Buna göre cevapla."
+        )
 
     if intent.category == "agent_task":
         agent_res = services.agent_mode.run(
