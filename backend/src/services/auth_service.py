@@ -9,7 +9,10 @@ import jwt
 
 class AuthService:
     def __init__(self):
-        self.jwt_secret = (os.environ.get("AYEX_JWT_SECRET") or "").strip() or "change-me-ayex-jwt-secret"
+        secret = os.environ.get("AYEX_JWT_SECRET")
+        if not secret:
+            raise RuntimeError("AYEX_JWT_SECRET environment variable is not set")
+        self.jwt_secret = secret.strip()
         self.jwt_alg = "HS256"
         self.jwt_exp_hours = max(1, int(os.environ.get("AYEX_JWT_EXP_HOURS", "12")))
 

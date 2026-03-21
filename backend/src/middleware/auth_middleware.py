@@ -14,7 +14,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
         self.auth = AuthService()
-        self.protected_prefixes = ("/chat", "/action", "/events")
+        self.protected_prefixes = (
+            "/chat",
+            "/action",
+            "/events",
+            "/sessions",
+            "/profile",
+            "/usage",
+            "/intel",
+        )
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path or ""
