@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+*.pyc
 *.py[cod]
 *.so
 .pytest_cache/
@@ -19,6 +20,10 @@ __pycache__/
 *.log
 /tmp/
 .ayex/
+
+# Frontend generated artifacts
+frontend/node_modules/
+frontend/dist/
 
 # Large local OpenClaw source clone (not needed for AYEX app deploy repo)
 openclaw/
