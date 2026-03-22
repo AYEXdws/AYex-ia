@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -417,7 +418,7 @@ def score_response(response: str) -> dict[str, float]:
     words = [w for w in re.findall(r"[a-zA-Z0-9_]+", low) if w]
     length_score = min(1.0, len(words) / 220.0)
     causal_score = 1.0 if any(x in low for x in ("because", "leads to", "implies", "therefore", "bu nedenle")) else 0.35
-    intel_score = 1.0 if any(x in low for x in ("temel icgoru", "ne izlenmeli", "sinyal", "guven", "key insight", "what to watch")) else 0.4
+    intel_score = 0.6  # doğal cevap base skoru, jargon araması yok
     return {
         "depth_score": round((length_score * 0.55) + (causal_score * 0.45), 4),
         "relevance_score": round((causal_score * 0.6) + (intel_score * 0.4), 4),
@@ -426,26 +427,15 @@ def score_response(response: str) -> dict[str, float]:
 
 
 def build_safe_fallback_response(intel_data: dict[str, Any], query: str = "") -> str:
-    """Intel verisi varsa sade bir özet üretir, jargon kullanmaz."""
-    _ = query
     events = (intel_data or {}).get("key_events") or []
     if not events:
-        return "Elimde güncel veri yok, biraz sonra tekrar dene."
+        return "Şu an güncel veri gelmiyor, biraz sonra tekrar dene."
 
-    lines = []
-    for ev in events[:3]:
-        title = ev.get("title", "")
-        summary = ev.get("summary", "")
-        if title:
-            if summary:
-                lines.append(f"{title}: {summary}")
-            else:
-                lines.append(title)
+    titles = [ev.get("title", "") for ev in events[:3] if ev.get("title")]
+    if not titles:
+        return "Veri var ama içerik okunamadı, tekrar dene."
 
-    if not lines:
-        return "Elimde güncel veri yok, biraz sonra tekrar dene."
-
-    return "Şu an elimdeki veriler:\n" + "\n".join(lines)
+    return f"Bakıyorum ama model şu an düzgün cevap üretemedi. Elimdeki başlıklar: {', '.join(titles)}. Soruyu biraz daha spesifik sorabilir misin?"
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -607,34 +597,35 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     if summary_memory_context:
         profile_prompt_base = f"{profile_prompt_base}\n\n{summary_memory_context}"
     if intel_mode:
-        intel_block = intel_data if intel_data else "INTEL_CONTEXT:\n- Key Events:\n- Yuksek oncelikli olay yok.\n\nINTEL_SUMMARY:\nYeterli intel yok."
-        intel_system_prompt = (
-            "Sen AYEX — Ahmet'in sistemi. Asistan değil, ortak.\n\n"
-            "Ahmet hakkında bildiklerin:\n"
-            "- 17 yaşında, Amasya\n"
-            "- 12. sınıf, YKS süreci var\n"
-            "- AYEX-IA, HAL, MindBloom projelerini geliştiriyor\n"
-            "- Kripto, siber güvenlik, yapay zeka ilgi alanları\n"
-            "- Katmanlı düşünür, analitik, anlam bağımlısı\n"
-            "- Sert geri bildirim ister, yalakalık istemez\n\n"
-            "KONUŞMA TARZI — ZORUNLU:\n"
-            "- Ahmet ile dost gibi konuş. Danışman gibi değil.\n"
-            "- \"Şuna dikkat etmelisin\" değil → \"Ahmet, bu riskli\"\n"
-            "- \"Önerim şudur\" değil → \"Ben olsam şunu yapardım\"\n"
-            "- Belirsiz soruda önce netleştir: \"Hangi kripto? BTC mi?\"\n"
-            "- Liste yapma — düz, akıcı konuş\n"
-            "- Kısa soruda 2-3 cümle. Uzun analizde paragraf, sade\n"
-            "- Zaman zaman \"bence\", \"sence\", \"dur bir düşün\" kullan\n\n"
-            "ZAMAN FARKINDALIGI:\n"
-            "Aşağıdaki intel verisi zaman damgalı.\n"
-            "\"Dün\" / \"bugün\" / \"karşılaştır\" gibi ifadelerde\n"
-            "tarihleri kullanarak net karşılaştırma yap.\n\n"
-            f"{intel_block}\n\n"
-            f"Kullanıcı odağı: {user_focus}\n\n"
-            "KURALLAR:\n"
-            "Sana verilen güncel verileri kendi cümlelerinle, doğal konuşma dilinde aktar. "
-            "Başlık, numara, skor, format şablonu kullanma. Ahmet'e arkadaşın gibi anlat.\n"
-        )
+        intel_system_prompt = f"""Sen AYEX'sin. Ahmet'in istihbarat sistemisin ama ondan önce dostsun.
+
+AHMET'İ TANIYORSUN:
+- 17 yaşında, Amasya, YKS süreci var ama asıl kafası projelerde
+- Kripto, siber güvenlik, yapay zeka, geopolitik — hepsine meraklı
+- Sert konuşmayı sever, yalakalık istemez, dolgu istemez
+
+NASIL KONUŞURSUN:
+- Ahmet'le arkadaşın gibi konuş. Resmi ve mesafeli kalıplar kullanma.
+- Kısa sorulara kısa cevap. "nasılsın" derse 1-2 cümle, uzatma.
+- Analiz gereken yerde derinleş ama sade tut. Başlık, numara, madde işareti kullanma.
+- Bilmiyorsan "elimde o veri yok" de, uydurmak YASAK.
+- Türkçe yaz, teknik terimler İngilizce kalabilir.
+
+VERİ KULLANIMI:
+Sana güncel veriler verilecek. Bu verilerle:
+- Soruya doğrudan cevap ver. Veriyi olduğu gibi yapıştırma, kendi cümlenle yorumla.
+- Sayıları kullan ama iç sistem terimleri kullanma.
+- Karşılaştırma istenirse iki zaman dilimini yan yana koy, farkı açıkla.
+- Genel soru gelirse (dünyada ne oldu) tüm kategorilerden özetle: kripto, haberler, siber güvenlik, ekonomi.
+- Spesifik soru gelirse (BTC ne durumda) sadece o konuya odaklan, gereksiz bilgi ekleme.
+- Eski ve yeni veri arasındaki değişimi fark et, trendi yorumla.
+- "Elimde X var ama Y yok" diyebilirsin, bu dürüstlük.
+
+{_build_intel_injection_text(intel_context) if intel_context else ""}
+
+Şu anki zaman: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC
+Türkiye saati: UTC+3
+"""
         profile_context_for_model = (
             f"{profile_prompt_base}\n\n"
             f"Ahmet'in bu mesajdaki tonu: {detected_tone}. Buna göre cevapla.\n\n"
@@ -668,91 +659,41 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             route_name="chat",
         )
 
-    reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
+    reply = normalize_intel_response(result.text or "")
     final_response_mode = "llm"
-    model_used_intel = False
-    fallback_used_intel = False
     used_intel = False
     if intel_mode:
-        hard_fail_reasons = {"empty", "too_short", "generic_phrase", "low_information"}
-        reply = normalize_intel_response(reply)
-        model_used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
-        if model_used_intel and injected_event_count > 0:
-            logger.info("INTEL_USED_TRUE reason=model")
-        else:
-            logger.info("INTEL_USED_FALSE reason=%s", intel_reason)
-        is_valid, validation_reason = validate_response_detailed(reply, intel_data=intel_context)
-        hard_validation_fail = (not is_valid) and (validation_reason in hard_fail_reasons)
-        needs_retry = (not model_used_intel and injected_event_count > 0) or hard_validation_fail
-        logger.info(
-            "CHAT_VALIDATION stage=initial passed=%s intel_used=%s reason=%s hard_fail=%s retry=%s",
-            is_valid,
-            model_used_intel,
-            "ok" if is_valid else validation_reason,
-            hard_validation_fail,
-            needs_retry,
-        )
+        needs_retry = len(reply) < 15
+        logger.info("CHAT_VALIDATION stage=initial short_or_empty=%s", needs_retry)
         if needs_retry:
-            reason_type = "intel_missing" if not model_used_intel and injected_event_count > 0 else validation_reason
-            logger.info("CHAT_REJECT stage=initial reason=%s", reason_type)
-            logger.info("RESPONSE_REJECTED_GENERIC reason=%s", reason_type)
-            retry_profile_context = (
-                f"{profile_context_for_model}\n\n"
-                "Onceki yanit yeterli netlikte degil veya secili intel ile yeterince baglantili degil.\n"
-                "Yanitini TEKRAR URET ve su kosullari karsila:\n"
-                "- Sadece Turkce yaz.\n"
-                "- Secilen istihbarat olaylarini dogrudan kullan.\n"
-                "- En az bir olay basligini acikca referansla.\n"
-                "- Neden-sonuc iliskisini ve kisa vade etkisini belirt.\n"
-                "- Gereksiz dolgu kullanma, ama formati dogal tut."
-            )
-            logger.info("CHAT_REGEN triggered=true")
-            logger.info("RESPONSE_REGENERATED")
+            logger.info("CHAT_REGEN triggered=true reason=short_or_empty")
             retry_result = services.openclaw.run_action(
                 model_input,
                 workspace=payload.workspace,
                 model=payload.model,
                 history=history,
-                profile_context=retry_profile_context,
+                profile_context=profile_context_for_model,
                 memory_context=merged_memory,
                 response_style=style_decision.style,
                 route_name="chat_regen",
             )
-            retry_reply = (retry_result.text or "").strip()
+            retry_reply = normalize_intel_response(retry_result.text or "")
             if retry_reply:
-                reply = normalize_intel_response(retry_reply)
+                reply = retry_reply
                 result = retry_result
-            model_used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
-            is_valid, validation_reason = validate_response_detailed(reply, intel_data=intel_context)
-            hard_validation_fail = (not is_valid) and (validation_reason in hard_fail_reasons)
-            needs_fallback = (not model_used_intel and injected_event_count > 0) or hard_validation_fail
-            if model_used_intel and injected_event_count > 0:
-                logger.info("INTEL_USED_TRUE reason=model")
-            else:
-                logger.info("INTEL_USED_FALSE reason=%s", intel_reason)
-            logger.info(
-                "CHAT_VALIDATION stage=regen passed=%s intel_used=%s reason=%s hard_fail=%s fallback=%s",
-                is_valid,
-                model_used_intel,
-                "ok" if is_valid else validation_reason,
-                hard_validation_fail,
-                needs_fallback,
-            )
-            if not needs_fallback:
                 final_response_mode = "regen"
-            if needs_fallback:
-                logger.info("REGEN_VALIDATION_FAILED reason=%s", validation_reason if not is_valid else intel_reason)
-                logger.info("RESPONSE_REJECTED_AFTER_REGEN reason=%s", validation_reason if not is_valid else intel_reason)
+
+            if len(reply) < 15:
+                logger.info("CHAT_FALLBACK used=true reason=short_or_empty_after_regen")
                 reply = build_safe_fallback_response(intel_context, text)
-                if injected_event_count > 0:
-                    fallback_used_intel = True
-                    logger.info("INTEL_USED_TRUE reason=fallback")
-                logger.info("CHAT_FALLBACK used=true")
-                logger.info("SAFE_FALLBACK_USED")
                 final_response_mode = "fallback"
-        used_intel = bool(injected_event_count > 0 and (model_used_intel or fallback_used_intel))
-        if final_response_mode != "fallback":
+            else:
+                logger.info("CHAT_FALLBACK used=false")
+        else:
             logger.info("CHAT_FALLBACK used=false")
+        used_intel = bool(injected_event_count > 0)
+    elif not reply:
+        reply = "Model yaniti alinamadi. Lutfen tekrar dene."
     logger.info("FINAL_RESPONSE_MODE=%s", final_response_mode)
     response_scores = score_response(reply)
 
