@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from backend.src.intel.intel_service import build_intel_context, select_relevant_intel_context, summarize_intel_context
+from backend.src.intel.intel_service import build_intel_context, select_relevant_intel_context
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
@@ -137,52 +137,41 @@ def get_latest_intel(services: BackendServices, *, user_id: str = "default") -> 
         return {}
 
 
-def format_intel_for_prompt(intel_context: dict[str, Any], *, relevant: bool = False) -> str:
-    key_events = intel_context.get("key_events") or []
-    signals = intel_context.get("signals") or []
-    summary = str(intel_context.get("summary") or "").strip()
-    confidence = float(intel_context.get("confidence") or 0.0)
-    recency_note = str(intel_context.get("recency_note") or "").strip()
-    query_focus = intel_context.get("query_focus") or {}
-    focus_topics = query_focus.get("topics") or []
-    focus_bias = query_focus.get("category_bias") or []
-    focus_tokens = query_focus.get("tokens") or []
-    focus_text = (
-        f"konular={', '.join(focus_topics) if focus_topics else 'genel'} | "
-        f"kategori_onceligi={', '.join(focus_bias) if focus_bias else 'yok'} | "
-        f"ana_anahtarlar={', '.join([str(t) for t in focus_tokens[:8]]) if focus_tokens else 'yok'}"
-    )
+def format_intel_for_prompt(intel_data: dict) -> str:
+    """Intel event'lerini LLM'e sade liste olarak sunar. Skor/sinyal/jargon yok."""
+    if not intel_data:
+        return ""
 
-    event_lines = []
-    for idx, item in enumerate(key_events[:5], start=1):
-        title = str(item.get("title") or "").strip()
-        cat = str(item.get("category") or "").strip()
-        score = float(item.get("score") or 0.0)
-        src = str(item.get("source") or "").strip()
-        ev_summary = str(item.get("summary") or "").strip()
-        event_lines.append(f"{idx}) {title} | cat={cat} | score={score:.2f} | src={src} | summary={ev_summary}")
+    events = intel_data.get("key_events") or []
+    if not events:
+        return ""
 
-    signal_lines = [f"- {s}" for s in signals[:8]]
-    if not event_lines:
-        event_lines = ["Yuksek oncelikli olay bulunamadi."]
-    if not signal_lines:
-        signal_lines = ["- Cikarilan sinyal yok."]
+    lines = []
+    for ev in events:
+        title = ev.get("title", "")
+        summary = ev.get("summary", "")
+        category = ev.get("category", "")
+        source = ev.get("source", "")
+        timestamp = ev.get("timestamp", "")
+        time_context = ev.get("time_context", "")
 
-    header = "ILGILI ISTIHBARAT VERISI" if relevant else "ISTIHBARAT VERISI"
-    return (
-        "SORU ODAĞI:\n"
-        + focus_text
-        + "\n\n"
-        + f"{header}:\n"
-        "- Temel Olaylar:\n"
-        + "\n".join(event_lines)
-        + "\n- Sinyaller:\n"
-        + "\n".join(signal_lines)
-        + "\n- Ozet:\n"
-        + (summary or "No intel summary.")
-        + f"\n- Guven Skoru: {confidence:.2f}"
-        + (f"\n- Guncellik: {recency_note}" if recency_note else "")
-    )[:2200]
+        parts = [f"- {title}"]
+        if summary:
+            parts.append(f"  {summary}")
+        meta = []
+        if category:
+            meta.append(category)
+        if source:
+            meta.append(source)
+        if timestamp:
+            meta.append(timestamp)
+        if time_context:
+            meta.append(time_context)
+        if meta:
+            parts.append(f"  [{', '.join(meta)}]")
+        lines.append("\n".join(parts))
+
+    return "\n\n".join(lines)
 
 
 def extract_user_focus(services: BackendServices, session_id: str, current_text: str) -> str:
@@ -335,107 +324,56 @@ def _build_intel_context_from_events(events: list[Any]) -> dict[str, Any]:
     }
 
 
-def _build_intel_injection_text(intel_context: dict[str, Any], compact_summary: str, max_chars: int = 2000) -> str:
-    events = intel_context.get("key_events") or []
-    event_lines: list[str] = []
-    for item in events[:5]:
-        title = str(item.get("title") or "").strip()
-        summary = str(item.get("summary") or "").strip()[:140]
-        event_lines.append(f"- [{title}]: {summary}")
-    if not event_lines:
-        event_lines = ["- Yuksek oncelikli olay bulunamadi."]
-    block = (
-        "INTEL_CONTEXT:\n"
-        "- Key Events:\n"
-        + "\n".join(event_lines)
-        + "\n\nINTEL_SUMMARY:\n"
-        + (compact_summary or "Yeterli intel ozeti yok.")
-    )
-    return block[:max_chars]
+def _build_intel_injection_text(intel_data: dict) -> str:
+    """Intel verisini prompt'a enjekte eder. Skor ve jargon içermez."""
+    if not intel_data:
+        return ""
+
+    formatted = format_intel_for_prompt(intel_data)
+    if not formatted:
+        return ""
+
+    timeframe_mode = intel_data.get("timeframe_mode", "none")
+    recency_note = intel_data.get("recency_note", "")
+
+    header = "GUNCEL VERILER:"
+    if timeframe_mode == "compare" and recency_note:
+        header = f"KARSILASTIRMA VERILERI ({recency_note}):"
+    elif recency_note and recency_note != "latest_events":
+        header = f"VERILER ({recency_note}):"
+
+    return f"\n{header}\n{formatted}\n"
 
 
-def validate_response(text: str) -> bool:
-    valid, _ = validate_response_detailed(text)
+def validate_response(text: str, intel_data: dict[str, Any] | None = None) -> bool:
+    valid, _ = validate_response_detailed(text, intel_data=intel_data)
     return valid
 
 
-def normalize_intel_response(text: str) -> str:
-    out = str(text or "").strip()
-    if not out:
-        return out
-    replacements = {
-        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*key\s*insight\s*:?\s*$": "1. Temel İçgörü",
-        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*temel\s*icgoru\s*:?\s*$": "1. Temel İçgörü",
-        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*why\s*it\s*matters\s*:?\s*$": "2. Neden Önemli",
-        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*neden\s*onemli\s*:?\s*$": "2. Neden Önemli",
-        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*risk\s*/\s*opportunity\s*:?\s*$": "3. Risk / Fırsat",
-        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*risk\s*/\s*firsat\s*:?\s*$": "3. Risk / Fırsat",
-        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*what\s*to\s*watch\s*:?\s*$": "4. Ne İzlenmeli",
-        r"(?im)^\s*(?:\d+[\).\s-]*)?\s*ne\s*izlenmeli\s*:?\s*$": "4. Ne İzlenmeli",
-    }
-    for pattern, repl in replacements.items():
-        out = re.sub(pattern, repl, out)
-    return out
+def normalize_intel_response(response: str) -> str:
+    """Cevap boşsa veya çok kısaysa uyarı döner, format müdahalesi yapmaz."""
+    if not response or not response.strip():
+        return ""
+    return response.strip()
 
 
-def validate_response_detailed(text: str) -> tuple[bool, str]:
+def validate_response_detailed(text: str, intel_data: dict[str, Any] | None = None) -> tuple[bool, str]:
     normalized_text = normalize_intel_response(text)
     low = _normalize_text(str(normalized_text or ""))
     if not low.strip():
         return False, "empty"
     words = [w for w in re.findall(r"[a-z0-9_]+", low) if w]
-    if len(words) < 22:
+    if len(words) < 12:
         return False, "too_short"
-    banned_generic = (
-        "generally",
-        "in general",
-        "volatility exists",
-        "it depends",
-        "could be many reasons",
-        "zor soylemek",
-        "genel olarak",
-        "piyasa dalgali",
-        "belirsizlik var",
-    )
-    if len(words) < 120 and any(p in low for p in banned_generic):
-        return False, "generic_phrase"
-
-    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
-    list_like = 0
-    for line in lines:
-        if re.match(r"^[-*•]\s+", line) or re.match(r"^\d+[\).\s-]+", line):
-            list_like += 1
-    if lines and (list_like / max(1, len(lines))) > 0.92 and len(words) < 45:
-        return False, "list_style_weak"
 
     if not _looks_turkish(low):
-        if len(words) < 50:
+        if len(words) < 20:
             return False, "non_turkish_content"
 
-    causal_markers = (
-        "because",
-        "leads to",
-        "implies",
-        "drives",
-        "therefore",
-        "bu nedenle",
-        "tetikler",
-        "sonucunda",
-        "neden olur",
-    )
-    analytic_markers = (
-        "bu nedenle",
-        "sonucunda",
-        "tetikler",
-        "baski",
-        "etki",
-        "risk",
-        "firsat",
-        "izlenmeli",
-        "kisa vade",
-    )
-    if len(words) < 45 and not any(m in low for m in (*causal_markers, *analytic_markers)):
-        return False, "low_information"
+    if (intel_data or {}).get("key_events"):
+        used, reason = did_use_intel_detailed(normalized_text, intel_data or {})
+        if not used:
+            return False, f"missing_event_reference:{reason}"
 
     return True, "ok"
 
@@ -449,66 +387,29 @@ def did_use_intel_detailed(response: str, intel_context: dict[str, Any]) -> tupl
     low = _normalize_text(str(response or ""))
     if not low.strip():
         return False, "empty_response"
-    response_tokens = _extract_tokens(low)
-    if not response_tokens:
-        return False, "low_token_density"
 
-    events = intel_context.get("key_events") or []
+    events = (intel_context or {}).get("key_events") or []
     if not events:
         return False, "no_intel_events"
 
-    title_hit = 0
-    summary_overlap = 0
-    category_hit = 0
-    signal_hit = 0
-    intel_token_bag: set[str] = set()
-
     for item in events[:5]:
         title = _normalize_text(str(item.get("title") or "").strip())
-        title_tokens = _extract_tokens(title)
-        intel_token_bag |= title_tokens
-        if title and title in low:
-            title_hit += 1
-        elif len(response_tokens & title_tokens) >= 2:
-            title_hit += 1
-
-        summary = _normalize_text(str(item.get("summary") or ""))
-        summary_tokens = _extract_tokens(summary)
-        intel_token_bag |= summary_tokens
-        if len(response_tokens & summary_tokens) >= 2:
-            summary_overlap += 1
-
-        category = _normalize_text(str(item.get("category") or "").strip())
-        if category:
-            cat_tokens = _extract_tokens(category) or {category}
-            intel_token_bag |= cat_tokens
-            if response_tokens & cat_tokens:
-                category_hit += 1
-
-    for sig in intel_context.get("signals") or []:
-        sig_norm = _normalize_text(str(sig or ""))
-        sig_tokens = _extract_tokens(sig_norm)
-        intel_token_bag |= sig_tokens
-        if sig_norm and sig_norm in low:
-            signal_hit += 1
+        if not title:
             continue
-        if response_tokens & sig_tokens:
-            signal_hit += 1
+        words = [w for w in re.findall(r"[a-z0-9_]+", title) if len(w) > 3]
+        unique_words = list(dict.fromkeys(words))
 
-    concept_overlap = len(response_tokens & intel_token_bag)
-    if title_hit >= 1 and concept_overlap >= 2:
-        return True, "title_overlap"
-    if signal_hit >= 1 and concept_overlap >= 2:
-        return True, "signal_overlap"
-    if summary_overlap >= 2 and concept_overlap >= 3:
-        return True, "summary_overlap"
-    if category_hit >= 1 and concept_overlap >= 2:
-        return True, "category_overlap"
-    if concept_overlap >= 4 and (summary_overlap >= 1 or title_hit >= 1):
-        return True, "concept_overlap"
-    if category_hit >= 1 and summary_overlap >= 1 and concept_overlap >= 3:
-        return True, "category_summary_overlap"
-    return False, "insufficient_intel_reference"
+        if len(unique_words) >= 2:
+            matches = sum(1 for w in unique_words if w in low)
+            if matches >= 2:
+                return True, "title_word_overlap"
+        elif len(unique_words) == 1 and unique_words[0] in low:
+            return True, "title_single_word_overlap"
+
+        if title in low:
+            return True, "title_exact_match"
+
+    return False, "no_event_reference"
 
 
 def score_response(response: str) -> dict[str, float]:
@@ -524,42 +425,27 @@ def score_response(response: str) -> dict[str, float]:
     }
 
 
-def build_safe_fallback_response(intel_context: dict[str, Any], user_text: str) -> str:
-    events = intel_context.get("key_events") or []
-    signals = intel_context.get("signals") or []
-    confidence = float(intel_context.get("confidence") or 0.0)
-
+def build_safe_fallback_response(intel_data: dict[str, Any], query: str = "") -> str:
+    """Intel verisi varsa sade bir özet üretir, jargon kullanmaz."""
+    _ = query
+    events = (intel_data or {}).get("key_events") or []
     if not events:
-        return (
-            "1. Temel İçgörü\n"
-            "Elde güçlü bir olay kümesi yok; mevcut sinyal yoğunluğu düşük olduğu için yüksek güvenli bir yön çıkarımı yapmak doğru değil.\n\n"
-            "2. Neden Önemli\n"
-            "Sinyal zayıfken agresif yorum yapmak hatalı karar riskini artırır; bu nedenle kısa vadede doğrulama sinyali beklemek daha rasyoneldir.\n\n"
-            "3. Risk / Fırsat\n"
-            "Risk: zayıf veriden kesin hüküm üretmek. Fırsat: yeni olaylar geldikçe daha temiz bir trend yakalama imkanı.\n\n"
-            "4. Ne İzlenmeli\n"
-            "Önümüzdeki 24-48 saatte yüksek skorlu yeni olay sayısı, tekrar eden anomali sinyalleri ve güven skorunun 0.60 üstüne çıkışı izlenmeli."
-        )
+        return "Elimde güncel veri yok, biraz sonra tekrar dene."
 
-    top = events[0]
-    title = str(top.get("title") or "Oncelikli olay")
-    category = str(top.get("category") or "other")
-    score = float(top.get("effective_score") or top.get("score") or 0.0)
-    signal = str(signals[0] if signals else f"risk:{title}")
-    user_focus_tokens = _extract_tokens(user_text)
-    focus_text = " / ".join(sorted(list(user_focus_tokens))[:3]) if user_focus_tokens else "kullanici odagi"
+    lines = []
+    for ev in events[:3]:
+        title = ev.get("title", "")
+        summary = ev.get("summary", "")
+        if title:
+            if summary:
+                lines.append(f"{title}: {summary}")
+            else:
+                lines.append(title)
 
-    return (
-        "1. Temel İçgörü\n"
-        f"En güçlü sinyal '{title}' ({category}) olayıdır; etkin skoru {score:.2f} ile şu an tabloyu belirleyen ana başlık budur.\n\n"
-        "2. Neden Önemli\n"
-        f"Bu olay '{signal}' sinyaliyle aynı yönde ilerlediği için kısa vadede {focus_text} tarafına baskı aktarımı üretebilir; "
-        f"güven skoru {confidence:.2f} olduğu için sinyal kullanılabilir ama teyit gerektirir.\n\n"
-        "3. Risk / Fırsat\n"
-        "Risk: takip verisi zayıflarsa sinyal hızla bozulabilir. Fırsat: ilişkili yüksek skorlu olaylar kümelenirse daha net yön oluşur.\n\n"
-        "4. Ne İzlenmeli\n"
-        "Önümüzdeki 24-48 saatte benzer sinyallerin artıp artmadığı, risk etiketli olay hızındaki değişim ve güven skorunun yönü takip edilmeli."
-    )
+    if not lines:
+        return "Elimde güncel veri yok, biraz sonra tekrar dene."
+
+    return "Şu an elimdeki veriler:\n" + "\n".join(lines)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -683,7 +569,6 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     injected_event_count = 0
     if intel_mode:
         intel_context = relevant_intel_context
-        compact_intel = summarize_intel_context(intel_context, max_chars=1000)
         selected_events = intel_context.get("key_events") or []
         injected_event_count = len(selected_events)
         selected_titles = [str(item.get("title") or "").strip() for item in selected_events if str(item.get("title") or "").strip()]
@@ -693,7 +578,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             " | ".join(selected_titles[:5]) if selected_titles else "none",
         )
         logger.info("INTEL_FETCH_SUCCESS count=%s", injected_event_count)
-        intel_data = _build_intel_injection_text(intel_context, compact_intel, max_chars=2000)
+        intel_data = _build_intel_injection_text(intel_context)
         logger.info("INTEL_INJECTED count=%s chars=%s", injected_event_count, len(intel_data))
         user_focus = extract_user_focus(services, session.id, text)
     memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
@@ -747,13 +632,8 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             f"{intel_block}\n\n"
             f"Kullanıcı odağı: {user_focus}\n\n"
             "KURALLAR:\n"
-            "- Turkce yaz. Dogal, samimi, dost gibi konus. Ahmet ile konusuyorsun.\n"
-            "- Hic teknik sistem jargonu kullanma: \"etkin skor\", \"guven skoru\", \"sinyal\", \"Temel Icgoru\" kelimeleri yasak.\n"
-            "- Gercek haber basliklarini referans ver: ornegin \"Ukrayna'da dron saldirisi oldu...\"\n"
-            "- Kisa ve net: genel sorular icin 3-5 cumle yeterli.\n"
-            "- Neden-sonuc kur: \"bu nedenle\", \"sonucunda\" kullan.\n"
-            "- Kisa vade etkisi belirt (24-48 saat).\n"
-            "- Tum kategorileri kullan: kripto, siber guvenlik, dunya haberleri hepsini goster.\n"
+            "Sana verilen güncel verileri kendi cümlelerinle, doğal konuşma dilinde aktar. "
+            "Başlık, numara, skor, format şablonu kullanma. Ahmet'e arkadaşın gibi anlat.\n"
         )
         profile_context_for_model = (
             f"{profile_prompt_base}\n\n"
@@ -801,7 +681,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             logger.info("INTEL_USED_TRUE reason=model")
         else:
             logger.info("INTEL_USED_FALSE reason=%s", intel_reason)
-        is_valid, validation_reason = validate_response_detailed(reply)
+        is_valid, validation_reason = validate_response_detailed(reply, intel_data=intel_context)
         hard_validation_fail = (not is_valid) and (validation_reason in hard_fail_reasons)
         needs_retry = (not model_used_intel and injected_event_count > 0) or hard_validation_fail
         logger.info(
@@ -821,7 +701,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
                 "Onceki yanit yeterli netlikte degil veya secili intel ile yeterince baglantili degil.\n"
                 "Yanitini TEKRAR URET ve su kosullari karsila:\n"
                 "- Sadece Turkce yaz.\n"
-                "- Secilen istihbarat olay ve sinyallerini dogrudan kullan.\n"
+                "- Secilen istihbarat olaylarini dogrudan kullan.\n"
                 "- En az bir olay basligini acikca referansla.\n"
                 "- Neden-sonuc iliskisini ve kisa vade etkisini belirt.\n"
                 "- Gereksiz dolgu kullanma, ama formati dogal tut."
@@ -843,7 +723,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
                 reply = normalize_intel_response(retry_reply)
                 result = retry_result
             model_used_intel, intel_reason = did_use_intel_detailed(reply, intel_context)
-            is_valid, validation_reason = validate_response_detailed(reply)
+            is_valid, validation_reason = validate_response_detailed(reply, intel_data=intel_context)
             hard_validation_fail = (not is_valid) and (validation_reason in hard_fail_reasons)
             needs_fallback = (not model_used_intel and injected_event_count > 0) or hard_validation_fail
             if model_used_intel and injected_event_count > 0:
