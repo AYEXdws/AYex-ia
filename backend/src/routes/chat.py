@@ -623,6 +623,7 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             },
         )
 
+    services.chat_store.append_message(session.id, role="user", text=text, source="user")
     history = services.chat_store.model_context(session.id, turns=services.settings.openclaw_context_turns)
     profile_data = services.profile.load()
     summary_memory_context = ""
@@ -746,13 +747,13 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
             f"{intel_block}\n\n"
             f"Kullanıcı odağı: {user_focus}\n\n"
             "KURALLAR:\n"
-            "- Turkce yaz. Dogal, samimi, Ahmet ile dost gibi konus.\n"
-            "- Hic baslik kullanma (Temel Icgoru, Neden Onemli gibi kelimeler yok).\n"
-            "- \"sinyal\", \"etkin skor\", \"guven skoru\" gibi ic sistem jargonu kullanma.\n"
-            "- Gercek haber basliklarini referans ver: \"Ukrayna'da dron saldirisi oldu...\"\n"
-            "- Kisa ve net: 3-5 cumle yeterli genel sorular icin.\n"
+            "- Turkce yaz. Dogal, samimi, dost gibi konus. Ahmet ile konusuyorsun.\n"
+            "- Hic teknik sistem jargonu kullanma: \"etkin skor\", \"guven skoru\", \"sinyal\", \"Temel Icgoru\" kelimeleri yasak.\n"
+            "- Gercek haber basliklarini referans ver: ornegin \"Ukrayna'da dron saldirisi oldu...\"\n"
+            "- Kisa ve net: genel sorular icin 3-5 cumle yeterli.\n"
             "- Neden-sonuc kur: \"bu nedenle\", \"sonucunda\" kullan.\n"
             "- Kisa vade etkisi belirt (24-48 saat).\n"
+            "- Tum kategorileri kullan: kripto, siber guvenlik, dunya haberleri hepsini goster.\n"
         )
         profile_context_for_model = (
             f"{profile_prompt_base}\n\n"
@@ -875,7 +876,6 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     logger.info("FINAL_RESPONSE_MODE=%s", final_response_mode)
     response_scores = score_response(reply)
 
-    services.chat_store.append_message(session.id, role="user", text=text, source="user")
     services.chat_store.append_message(
         session.id,
         role="assistant",

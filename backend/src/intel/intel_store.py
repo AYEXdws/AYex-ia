@@ -23,8 +23,6 @@ class IntelStore:
             self._persist_path.parent.mkdir(parents=True, exist_ok=True)
             if self._persist_path.exists():
                 self._load_from_disk()
-            else:
-                self._persist_path.write_text("[]", encoding="utf-8")
             self._restore_from_archive_if_empty()
 
     def add_event(self, event: IntelEvent) -> IntelEvent | None:
@@ -126,7 +124,7 @@ class IntelStore:
                 continue
             self._events = restored
             self._persist_to_disk()
-            logger.info("INTEL_STORE_RESTORED_FROM_ARCHIVE date=%s count=%s", day_str, len(restored))
+            logger.info("INTEL_RESTORED count=%s source=archive_%s", len(restored), day_str)
             return
 
     def _load_archive_day(self, date_str: str) -> list[IntelEvent]:

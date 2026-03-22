@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from backend.src.intel.event_model import IntelEvent
@@ -105,6 +105,121 @@ def extract_query_topics(query: str) -> dict:
         "tokens": sorted(list(q_tokens))[:30],
         "category_bias": category_bias,
     }
+
+
+def is_general_news_query(text: str) -> bool:
+    general_keywords = [
+        "neler oldu",
+        "dunya",
+        "haberler",
+        "gundem",
+        "bugun ne",
+        "son dakika",
+        "gelismeler",
+        "ne var ne yok",
+        "ozet",
+        "brief",
+        "rapor",
+    ]
+    q = _normalize_text(text)
+    return any(kw in q for kw in general_keywords)
+
+
+def _event_to_utc(ts) -> datetime:
+    if not isinstance(ts, datetime):
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if ts.tzinfo is not None:
+        return ts.astimezone(timezone.utc)
+    return ts.replace(tzinfo=timezone.utc)
+
+
+def _format_short_date(dt_value: datetime) -> str:
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    idx = max(1, min(12, int(dt_value.month))) - 1
+    return f"{int(dt_value.day):02d} {months[idx]}"
+
+
+def _load_archive_events(service: "IntelService", *, lookback_days: int = 21) -> list[IntelEvent]:
+    archive = getattr(service.store, "archive", None)
+    if archive is None:
+        return []
+    end_day = datetime.utcnow().date()
+    start_day = end_day - timedelta(days=max(2, int(lookback_days)))
+    try:
+        rows = list(archive.get_events_by_range(start_day.isoformat(), end_day.isoformat()) or [])
+        return rows
+    except Exception as exc:
+        logger.info("INTEL_ARCHIVE_RANGE_READ_FAIL start=%s end=%s error=%s", start_day.isoformat(), end_day.isoformat(), exc)
+        return []
+
+
+def _events_in_age_window(events: list[IntelEvent], *, min_hours: float, max_hours: float) -> list[IntelEvent]:
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    rows: list[tuple[datetime, IntelEvent]] = []
+    for event in list(events or []):
+        if _is_noise_event(event):
+            continue
+        event_utc = _event_to_utc(getattr(event, "timestamp", None))
+        if event_utc == datetime.min.replace(tzinfo=timezone.utc):
+            continue
+        age_hours = (now_utc - event_utc).total_seconds() / 3600.0
+        if min_hours <= age_hours < max_hours:
+            rows.append((event_utc, event))
+    rows.sort(key=lambda x: x[0], reverse=True)
+    return [row[1] for row in rows]
+
+
+def _pick_general_latest_events(events: list[IntelEvent], *, max_events: int) -> list[IntelEvent]:
+    safe_limit = max(1, min(10, int(max_events or 5)))
+    ordered = sorted(
+        list(events or []),
+        key=lambda ev: _event_to_utc(getattr(ev, "timestamp", None)),
+        reverse=True,
+    )
+    selected: list[IntelEvent] = []
+    seen_titles: set[str] = set()
+
+    def _try_add(event: IntelEvent) -> bool:
+        if _is_noise_event(event):
+            return False
+        title_key = re.sub(r"\s+", " ", _normalize_text(str(getattr(event, "title", "") or "").strip()))
+        if not title_key or title_key in seen_titles:
+            return False
+        seen_titles.add(title_key)
+        selected.append(event)
+        return True
+
+    required_categories = ("economy", "security", "global", "tech")
+    for required in required_categories:
+        for event in ordered:
+            category_norm = _normalize_text(str(getattr(event, "category", "") or "")).strip()
+            if category_norm != required:
+                continue
+            if _try_add(event):
+                break
+        if len(selected) >= safe_limit:
+            return sorted(
+                selected[:safe_limit],
+                key=lambda ev: _event_to_utc(getattr(ev, "timestamp", None)),
+                reverse=True,
+            )
+
+    for event in ordered:
+        if len(selected) >= safe_limit:
+            break
+        _try_add(event)
+    return sorted(
+        selected[:safe_limit],
+        key=lambda ev: _event_to_utc(getattr(ev, "timestamp", None)),
+        reverse=True,
+    )
+
+
+def _event_identity(event: IntelEvent) -> str:
+    event_id = str(getattr(event, "id", "") or "").strip()
+    title_key = re.sub(r"\s+", " ", _normalize_text(str(getattr(event, "title", "") or "").strip()))
+    ts_key = _event_to_utc(getattr(event, "timestamp", None)).isoformat()
+    return f"{event_id}|{title_key}|{ts_key}"
 
 
 def _event_topic_hits(event: IntelEvent, query_topics: list[str]) -> float:
@@ -714,35 +829,143 @@ def select_relevant_intel_context(
     query_tokens = set(query_info.get("tokens") or [])
     query_topics = list(query_info.get("topics") or [])
     query_categories = set(query_info.get("category_bias") or [])
+    general_query = is_general_news_query(query)
 
     events = service.store.get_all_events()
-    filtered = service.filter_by_user_profile(events, user_id=user_id)
-    timeframe_selection = select_intel_by_timeframe(filtered, query)
+    profile_filtered = service.filter_by_user_profile(events, user_id=user_id)
+    timeframe_selection = select_intel_by_timeframe(service, query, fallback_events=events)
     comparison_block = ""
     timeframe_mode = "none"
+    timeframe_label = ""
+    scoped_events: list[IntelEvent] | None = None
+    time_labels: dict[str, str] = {}
     if isinstance(timeframe_selection, dict):
         timeframe_mode = str(timeframe_selection.get("mode") or "single")
         if timeframe_mode == "compare":
             old_events = list(timeframe_selection.get("old_events") or [])
             new_events = list(timeframe_selection.get("new_events") or [])
-            comparison_block = build_comparison_block(old_events, new_events)
-            filtered = old_events + new_events
-            logger.info("INTEL_TIMEFRAME mode=compare old=%s new=%s", len(old_events), len(new_events))
+            old_label = str(timeframe_selection.get("old_label") or "")
+            new_label = str(timeframe_selection.get("new_label") or "")
+            comparison_block = build_comparison_block(
+                old_events,
+                new_events,
+                old_label=old_label,
+                new_label=new_label,
+            )
+            scoped_events = old_events + new_events
+            for event in old_events:
+                time_labels[_event_identity(event)] = old_label
+            for event in new_events:
+                time_labels[_event_identity(event)] = new_label
+            logger.info(
+                "INTEL_TIMEFRAME mode=compare old=%s new=%s old_label=%s new_label=%s",
+                len(old_events),
+                len(new_events),
+                old_label,
+                new_label,
+            )
         else:
             scoped = list(timeframe_selection.get("events") or [])
-            filtered = scoped
-            logger.info("INTEL_TIMEFRAME mode=single count=%s", len(scoped))
-    category_hint = next(iter(query_categories), None) if len(query_categories) == 1 else None
-    historical_block = service.get_historical_comparison(query, category=category_hint)
-    if historical_block:
+            timeframe_label = str(timeframe_selection.get("label_text") or "")
+            scoped_events = scoped
+            for event in scoped:
+                time_labels[_event_identity(event)] = timeframe_label
+            logger.info("INTEL_TIMEFRAME mode=single count=%s label=%s", len(scoped), timeframe_label)
+
+    timeframe_active = bool(scoped_events is not None)
+    candidate_events = list(scoped_events or (events if general_query else profile_filtered))
+
+    if general_query:
+        selected_general = _pick_general_latest_events(
+            candidate_events,
+            max_events=max(1, min(5, int(max_events or 5))),
+        )
+        key_events: list[dict] = []
+        time_windows: list[str] = []
+        for event in selected_general:
+            freshness_multiplier, time_window, _ = _freshness_for_timestamp(event.timestamp)
+            effective_score = float(event.final_score) * freshness_multiplier
+            event_label = time_labels.get(_event_identity(event), timeframe_label)
+            time_windows.append(time_window)
+            key_events.append(
+                {
+                    "title": event.title,
+                    "summary": str(event.summary or "")[:220],
+                    "category": event.category,
+                    "score": round(float(event.final_score), 4),
+                    "effective_score": round(float(effective_score), 4),
+                    "query_match_score": 1.0,
+                    "freshness_multiplier": round(float(freshness_multiplier), 2),
+                    "importance": int(event.importance),
+                    "source": event.source,
+                    "tags": list(event.tags or [])[:4],
+                    "timestamp": event.timestamp.isoformat(),
+                    "time_context": event_label,
+                }
+            )
+
+        trend_keywords = ("rise", "rises", "surge", "growth", "improves", "record")
+        anomaly_keywords = ("breach", "outage", "crash", "urgent", "spike")
+        risk_keywords = ("risk", "regulation", "breach", "outage", "volatility", "sanction")
+        signals: list[str] = []
+        for ev in key_events:
+            title_low = str(ev.get("title") or "").lower()
+            tags_low = " ".join([str(t).lower() for t in ev.get("tags") or []])
+            mixed = f"{title_low} {tags_low}"
+            if any(k in mixed for k in trend_keywords):
+                signals.append(f"trend:{ev.get('title')}")
+            if any(k in mixed for k in anomaly_keywords):
+                signals.append(f"anomaly:{ev.get('title')}")
+            if any(k in mixed for k in risk_keywords):
+                signals.append(f"risk:{ev.get('title')}")
+        dedup_signals: list[str] = []
+        seen_signals: set[str] = set()
+        for signal in signals:
+            if signal in seen_signals:
+                continue
+            seen_signals.add(signal)
+            dedup_signals.append(signal)
+            if len(dedup_signals) >= 8:
+                break
+
         if comparison_block:
-            comparison_block = f"{historical_block}\n\n{comparison_block}"
+            summary = comparison_block
+        elif key_events:
+            categories = sorted(
+                {
+                    str(item.get("category") or "").strip()
+                    for item in key_events
+                    if str(item.get("category") or "").strip()
+                }
+            )
+            categories_text = ", ".join(categories) if categories else "genel"
+            title_summary = " | ".join([f"{item['title']} ({item['category']})" for item in key_events[:3]])
+            if timeframe_label:
+                summary = f"{timeframe_label}\n{title_summary}"
+            else:
+                summary = f"Genel gundem ({categories_text}): {title_summary}"
         else:
-            comparison_block = historical_block
-    timeframe_active = timeframe_mode != "none"
+            summary = f"{timeframe_label}\nBu zaman araliginda olay verisi yok." if timeframe_label else "Guncel olay verisi yok."
+
+        dominant_time_window = max(set(time_windows), key=time_windows.count) if time_windows else "unknown"
+        confidence = 0.0
+        if key_events:
+            confidence = sum(float(item["effective_score"]) for item in key_events) / float(len(key_events))
+            confidence = max(0.0, min(1.0, confidence))
+
+        return {
+            "key_events": key_events,
+            "summary": summary[:900],
+            "signals": dedup_signals,
+            "confidence": round(confidence, 4),
+            "recency_note": timeframe_label or f"dominant_time_window={dominant_time_window}",
+            "query_focus": query_info,
+            "timeframe_mode": timeframe_mode,
+        }
+
     ranked: list[tuple[float, float, float, float, str, IntelEvent]] = []
 
-    for event in filtered:
+    for event in candidate_events:
         if _is_noise_event(event):
             continue
         title_tokens = _tokenize(event.title)
@@ -763,11 +986,10 @@ def select_relevant_intel_context(
         query_match_score = min(1.0, (overlap_norm * 0.72) + (topic_hit * 0.28) + category_bias_boost)
 
         event_cat = _normalize_text(event.category)
-        if not timeframe_active:
-            if query_categories and event_cat not in query_categories and topic_hit <= 0.0 and overlap_raw <= 0.0:
-                continue
-            if query_tokens and query_match_score < 0.08:
-                continue
+        if query_categories and event_cat not in query_categories and topic_hit <= 0.0 and overlap_raw <= 0.0:
+            continue
+        if query_tokens and query_match_score < 0.08:
+            continue
 
         freshness_multiplier, time_window, freshness_bonus = _freshness_for_timestamp(event.timestamp)
         effective_relevance_score = (query_match_score * 0.60) + (float(event.final_score) * 0.25) + (freshness_bonus * 0.15)
@@ -795,6 +1017,7 @@ def select_relevant_intel_context(
             continue
         seen_titles.add(normalized)
         time_windows.append(time_window)
+        event_label = time_labels.get(_event_identity(event), timeframe_label)
         key_events.append(
             {
                 "title": event.title,
@@ -808,6 +1031,7 @@ def select_relevant_intel_context(
                 "source": event.source,
                 "tags": list(event.tags or [])[:4],
                 "timestamp": event.timestamp.isoformat(),
+                "time_context": event_label,
             }
         )
         if len(key_events) >= max(1, min(5, max_events)):
@@ -845,8 +1069,13 @@ def select_relevant_intel_context(
             [f"{item['title']} (q:{item['query_match_score']:.2f}, score:{item['effective_score']:.2f})" for item in key_events[:3]]
         )
         summary = f"Query topics={topics_text}. {summary}"
+        if timeframe_label:
+            summary = f"{timeframe_label}\n{summary}"
     else:
-        summary = "No relevant events matched the current query focus."
+        if timeframe_label:
+            summary = f"{timeframe_label}\nBu zaman araliginda ilgili olay bulunamadi."
+        else:
+            summary = "No relevant events matched the current query focus."
 
     dominant_time_window = max(set(time_windows), key=time_windows.count) if time_windows else "unknown"
     confidence = 0.0
@@ -859,78 +1088,101 @@ def select_relevant_intel_context(
         "summary": summary[:900],
         "signals": dedup_signals,
         "confidence": round(confidence, 4),
-        "recency_note": f"dominant_time_window={dominant_time_window}",
+        "recency_note": timeframe_label or f"dominant_time_window={dominant_time_window}",
         "query_focus": query_info,
         "timeframe_mode": timeframe_mode,
     }
 
 
-def select_intel_by_timeframe(events: list[IntelEvent], query_text: str) -> dict | None:
+def select_intel_by_timeframe(
+    service: IntelService,
+    query_text: str,
+    *,
+    fallback_events: list[IntelEvent] | None = None,
+) -> dict | None:
     q = _normalize_text(query_text)
 
     has_today = any(token in q for token in ("bugun", "today"))
-    has_yesterday = any(token in q for token in ("dun", "yesterday"))
+    has_yesterday = any(token in q for token in ("dun", "dunku", "yesterday"))
     has_this_week = any(token in q for token in ("bu hafta", "this week"))
     has_last_week = any(token in q for token in ("gecen hafta", "last week"))
-    has_compare = any(token in q for token in ("karsilastir", "compare", "versus", "vs"))
+    has_compare = any(token in q for token in ("karsilastir", "compare", "fark", "versus", "vs"))
 
     if not any((has_today, has_yesterday, has_this_week, has_last_week, has_compare)):
         return None
 
+    archive_events = _load_archive_events(service, lookback_days=21)
+    pool = list(archive_events or fallback_events or [])
     now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
 
-    def _events_in_age_window(min_hours: float, max_hours: float) -> list[IntelEvent]:
-        rows: list[tuple[datetime, IntelEvent]] = []
-        for event in list(events or []):
-            ts = getattr(event, "timestamp", None)
-            if not isinstance(ts, datetime):
-                continue
-            event_utc = ts.astimezone(timezone.utc) if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
-            age_hours = (now_utc - event_utc).total_seconds() / 3600.0
-            if min_hours <= age_hours < max_hours:
-                rows.append((event_utc, event))
-        rows.sort(key=lambda x: x[0], reverse=True)
-        return [row[1] for row in rows]
+    today_label = f"[Bugün - {_format_short_date(now_utc)}]"
+    yesterday_label = f"[Dün - {_format_short_date(now_utc - timedelta(days=1))}]"
+    this_week_start = now_utc - timedelta(days=6)
+    last_week_end = now_utc - timedelta(days=7)
+    last_week_start = now_utc - timedelta(days=13)
+    this_week_label = f"[Bu Hafta - {_format_short_date(this_week_start)}-{_format_short_date(now_utc)}]"
+    last_week_label = f"[Gecen Hafta - {_format_short_date(last_week_start)}-{_format_short_date(last_week_end)}]"
 
     if has_compare:
         if has_this_week or has_last_week:
-            old_events = _events_in_age_window(24.0 * 7.0, 24.0 * 14.0)
-            new_events = _events_in_age_window(0.0, 24.0 * 7.0)
+            old_events = _events_in_age_window(pool, min_hours=24.0 * 7.0, max_hours=24.0 * 14.0)
+            new_events = _events_in_age_window(pool, min_hours=0.0, max_hours=24.0 * 7.0)
+            old_label = last_week_label
+            new_label = this_week_label
         else:
-            old_events = _events_in_age_window(24.0, 48.0)
-            new_events = _events_in_age_window(0.0, 24.0)
+            old_events = _events_in_age_window(pool, min_hours=24.0, max_hours=48.0)
+            new_events = _events_in_age_window(pool, min_hours=0.0, max_hours=24.0)
+            old_label = yesterday_label
+            new_label = today_label
         return {
             "mode": "compare",
             "old_events": old_events,
             "new_events": new_events,
+            "old_label": old_label,
+            "new_label": new_label,
+            "source": "archive" if archive_events else "store",
         }
 
     if has_yesterday:
         return {
             "mode": "single",
-            "events": _events_in_age_window(24.0, 48.0),
+            "events": _events_in_age_window(pool, min_hours=24.0, max_hours=48.0),
             "label": "yesterday",
+            "label_text": yesterday_label,
+            "source": "archive" if archive_events else "store",
         }
     if has_today:
         return {
             "mode": "single",
-            "events": _events_in_age_window(0.0, 24.0),
+            "events": _events_in_age_window(pool, min_hours=0.0, max_hours=24.0),
             "label": "today",
+            "label_text": today_label,
+            "source": "archive" if archive_events else "store",
         }
     if has_last_week:
         return {
             "mode": "single",
-            "events": _events_in_age_window(24.0 * 7.0, 24.0 * 14.0),
+            "events": _events_in_age_window(pool, min_hours=24.0 * 7.0, max_hours=24.0 * 14.0),
             "label": "last_week",
+            "label_text": last_week_label,
+            "source": "archive" if archive_events else "store",
         }
     return {
         "mode": "single",
-        "events": _events_in_age_window(0.0, 24.0 * 7.0),
+        "events": _events_in_age_window(pool, min_hours=0.0, max_hours=24.0 * 7.0),
         "label": "this_week",
+        "label_text": this_week_label,
+        "source": "archive" if archive_events else "store",
     }
 
 
-def build_comparison_block(old_events: list[IntelEvent], new_events: list[IntelEvent]) -> str:
+def build_comparison_block(
+    old_events: list[IntelEvent],
+    new_events: list[IntelEvent],
+    *,
+    old_label: str | None = None,
+    new_label: str | None = None,
+) -> str:
     def _period_date(events: list[IntelEvent]) -> str:
         dated: list[datetime] = []
         for event in events:
@@ -976,14 +1228,17 @@ def build_comparison_block(old_events: list[IntelEvent], new_events: list[IntelE
     else:
         diff = "Karsilastirma icin yeterli olay yok."
 
-    old_date = _period_date(old_events)
-    new_date = _period_date(new_events)
+    if not old_label:
+        old_label = f"[Önceki Dönem - {_period_date(old_events)}]"
+    if not new_label:
+        new_label = f"[Güncel Dönem - {_period_date(new_events)}]"
+
     return (
         "ZAMAN KARŞILAŞTIRMASI:\n\n"
-        f"[Önceki Dönem - {old_date}]\n"
+        f"{old_label}\n"
         + "\n".join(_event_lines(old_events))
         + "\n\n"
-        f"[Güncel Dönem - {new_date}]\n"
+        f"{new_label}\n"
         + "\n".join(_event_lines(new_events))
         + "\n\n"
         f"Fark: {diff}"
