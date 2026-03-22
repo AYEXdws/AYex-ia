@@ -114,16 +114,18 @@ class OpenClawService:
                 messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
                 messages.extend(context)
                 messages.append({"role": "user", "content": prompt})
+                normalized_model = normalize_model_for_openai(model_name)
+                call_params: dict[str, object] = {
+                    "model": model_name,
+                    "messages": messages,
+                    "max_tokens": token_budget,
+                    "temperature": 0.2,
+                }
+                if "gpt-5" in (normalized_model or "").lower():
+                    call_params.pop("temperature", None)
                 req = urlrequest.Request(
                     f"{self.settings.openclaw_base_url}/v1/chat/completions",
-                    data=json.dumps(
-                        {
-                            "model": model_name,
-                            "messages": messages,
-                            "max_tokens": token_budget,
-                            "temperature": 0.2,
-                        }
-                    ).encode("utf-8"),
+                    data=json.dumps(call_params).encode("utf-8"),
                     method="POST",
                     headers=self._headers(),
                 )
