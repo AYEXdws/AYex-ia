@@ -8,6 +8,12 @@ from pathlib import Path
 @dataclass(frozen=True)
 class BackendSettings:
     api_base_url: str
+    anthropic_api_key: str
+    ayex_model: str
+    ayex_chat_model: str
+    ayex_reasoning_model: str
+    ayex_power_model: str
+    ayex_fast_model: str
     stt_model: str
     tts_model: str
     default_voice: str
@@ -45,6 +51,12 @@ def load_settings() -> BackendSettings:
     chat_dir = Path(os.environ.get("AYEX_CHAT_DIR") or str(data_dir / "chats")).expanduser().resolve()
     return BackendSettings(
         api_base_url=(os.environ.get("AYEX_API_BASE_URL") or "https://api.openai.com/v1").rstrip("/"),
+        anthropic_api_key=(os.environ.get("ANTHROPIC_API_KEY") or "").strip(),
+        ayex_model=(os.environ.get("AYEX_MODEL") or "claude-haiku-4.5").strip(),
+        ayex_chat_model=(os.environ.get("AYEX_CHAT_MODEL") or "claude-haiku-4.5").strip(),
+        ayex_reasoning_model=(os.environ.get("AYEX_REASONING_MODEL") or "claude-sonnet-4.6").strip(),
+        ayex_power_model=(os.environ.get("AYEX_POWER_MODEL") or "gpt-5").strip(),
+        ayex_fast_model=(os.environ.get("AYEX_FAST_MODEL") or "gpt-4o-mini").strip(),
         stt_model=os.environ.get("AYEX_STT_MODEL", "gpt-4o-mini-transcribe"),
         tts_model=os.environ.get("AYEX_TTS_MODEL", "gpt-4o-mini-tts"),
         default_voice=os.environ.get("AYEX_DEFAULT_VOICE", "alloy"),

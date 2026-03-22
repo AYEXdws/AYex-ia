@@ -12,6 +12,7 @@ from backend.src.intel.intel_service import build_intel_context, select_relevant
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
+from backend.src.services.model_router import ModelSelection, select_model
 from backend.src.utils.logging import get_logger
 
 router = APIRouter()
@@ -637,11 +638,27 @@ Türkiye saati: UTC+3
             f"Ahmet'in bu mesajdaki tonu: {detected_tone}. Buna göre cevapla."
         )
 
+    model_selection: ModelSelection = select_model(
+        text,
+        chat_model=services.settings.ayex_chat_model,
+        reasoning_model=services.settings.ayex_reasoning_model,
+        power_model=services.settings.ayex_power_model,
+        fast_model=services.settings.ayex_fast_model,
+        intel_event_count=len((intel_context or {}).get("key_events", [])),
+    )
+    logger.info(
+        "MODEL_SELECTED model=%s provider=%s route=%s reason=%s",
+        model_selection.model,
+        model_selection.provider,
+        model_selection.route,
+        model_selection.reason,
+    )
+
     if intent.category == "agent_task":
         agent_res = services.agent_mode.run(
             text=text,
             workspace=payload.workspace,
-            model=payload.model,
+            model=model_selection.model,
             profile_context=profile_context_for_model,
             memory_context=merged_memory,
             response_style=style_decision.style,
@@ -651,12 +668,12 @@ Türkiye saati: UTC+3
         result = services.openclaw.run_action(
             model_input,
             workspace=payload.workspace,
-            model=payload.model,
+            model=model_selection.model,
             history=history,
             profile_context=profile_context_for_model,
             memory_context=merged_memory,
             response_style=style_decision.style,
-            route_name="chat",
+            route_name=f"chat_{model_selection.route}",
         )
 
     reply = normalize_intel_response(result.text or "")
@@ -670,12 +687,12 @@ Türkiye saati: UTC+3
             retry_result = services.openclaw.run_action(
                 model_input,
                 workspace=payload.workspace,
-                model=payload.model,
+                model=model_selection.model,
                 history=history,
                 profile_context=profile_context_for_model,
                 memory_context=merged_memory,
                 response_style=style_decision.style,
-                route_name="chat_regen",
+                route_name=f"chat_regen_{model_selection.route}",
             )
             retry_reply = normalize_intel_response(retry_result.text or "")
             if retry_reply:

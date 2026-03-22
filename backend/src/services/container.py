@@ -10,6 +10,7 @@ from backend.src.intel.intel_service import IntelService
 from backend.src.intel.intel_store import IntelStore
 from backend.src.services.agent_mode import AgentModeService
 from backend.src.services.agent_registry import AgentRegistry
+from backend.src.services.anthropic_client import AnthropicClient
 from backend.src.services.auth_service import AuthService
 from backend.src.services.chat_store import ChatStore
 from backend.src.services.cost_guard import CostGuardService
@@ -74,7 +75,14 @@ def build_services() -> BackendServices:
     tool_registry = ToolRegistry()
     tools = ToolRouter(registry=tool_registry)
     voice = VoiceResponseService()
-    openclaw = OpenClawService(settings, agents=agents)
+    anthropic_client = None
+    if settings.anthropic_api_key:
+        try:
+            anthropic_client = AnthropicClient(api_key=settings.anthropic_api_key)
+            logger.info("ANTHROPIC_CLIENT initialized")
+        except Exception as e:
+            logger.warning("ANTHROPIC_CLIENT_FAILED error=%s", str(e))
+    openclaw = OpenClawService(settings, agents=agents, anthropic_client=anthropic_client)
     chat_store = ChatStore(settings)
     profile = ProfileService(settings)
     auth = AuthService()

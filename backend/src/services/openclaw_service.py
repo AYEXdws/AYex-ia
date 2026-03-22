@@ -9,6 +9,7 @@ from urllib import request as urlrequest
 
 from backend.src.config.env import BackendSettings, normalize_model_for_openai
 from backend.src.services.agent_registry import AgentRegistry
+from backend.src.services.anthropic_client import AnthropicClient, ClaudeChatResult
 from backend.src.services.http_utils import parse_json_bytes, with_retries
 from backend.src.services.openai_client import OpenAIDirectClient
 from backend.src.utils.logging import get_logger
@@ -26,16 +27,19 @@ class OpenClawResult:
     cache_hit: bool = False
     token_budget: int = 0
     context_messages: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     used_model: str = ""
     model_locked: bool = False
     response_style: str = "normal"
 
 
 class OpenClawService:
-    def __init__(self, settings: BackendSettings, agents: AgentRegistry):
+    def __init__(self, settings: BackendSettings, agents: AgentRegistry, anthropic_client: AnthropicClient | None = None):
         self.settings = settings
         self.agents = agents
         self.openai = OpenAIDirectClient(settings)
+        self.anthropic_client = anthropic_client
         self._cache: dict[str, tuple[float, OpenClawResult]] = {}
         self._cache_lock = threading.Lock()
 
@@ -193,10 +197,50 @@ class OpenClawService:
         response_style: str = "normal",
         route_name: str = "action",
     ) -> OpenClawResult:
+        _ = workspace
         prompt = (text or "").strip()
         model_name = self._resolve_model(model)
         normalized_model = normalize_model_for_openai(model_name)
+        token_budget = self._compute_token_budget(prompt, response_style=response_style)
+        context_messages = len(self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns))
+        system_prompt = self._compose_system_prompt(profile_context, memory_context, response_style=response_style)
         started = time.perf_counter()
+
+        claude_result: ClaudeChatResult | None = None
+        if self.anthropic_client and _is_claude_model(normalized_model):
+            try:
+                claude_messages = self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns)
+                if not claude_messages:
+                    claude_messages = [{"role": "user", "content": prompt}]
+                else:
+                    claude_messages = [*claude_messages, {"role": "user", "content": prompt}]
+                claude_result = self.anthropic_client.chat(
+                    model=normalized_model,
+                    system=system_prompt if system_prompt else "",
+                    messages=claude_messages,
+                    max_tokens=token_budget or 1024,
+                    temperature=0.7,
+                )
+                return OpenClawResult(
+                    ok=True,
+                    text=claude_result.text,
+                    raw={"provider": "anthropic"},
+                    source="anthropic_direct",
+                    latency_ms=claude_result.latency_ms,
+                    cache_hit=False,
+                    token_budget=token_budget,
+                    context_messages=context_messages,
+                    input_tokens=claude_result.input_tokens,
+                    output_tokens=claude_result.output_tokens,
+                    used_model=claude_result.model,
+                    model_locked=False,
+                    response_style=response_style,
+                )
+            except Exception as e:
+                logger.warning("CLAUDE_FALLBACK error=%s falling_back_to=openai", str(e))
+                model_name = (self.settings.ayex_fast_model or "gpt-4o-mini").strip()
+                normalized_model = normalize_model_for_openai(model_name)
+
         try:
             # Deliberately bypass agent-level canned fallback text when OpenClaw is disabled.
             # In this mode we must return only real model output or an explicit failure.
@@ -209,10 +253,11 @@ class OpenClawService:
             response = self.openai.call_responses(
                 prompt=enriched,
                 model=model_name,
-                instructions=self._compose_system_prompt(profile_context, memory_context, response_style=response_style),
-                max_output_tokens=self._compute_token_budget(prompt, response_style=response_style),
+                instructions=system_prompt,
+                max_output_tokens=token_budget,
                 route_name=route_name,
             )
+            in_tokens, out_tokens = self._extract_usage_tokens(response.raw)
             return OpenClawResult(
                 ok=True,
                 text=response.text,
@@ -220,8 +265,10 @@ class OpenClawService:
                 source="openai_direct",
                 latency_ms=response.latency_ms,
                 cache_hit=False,
-                token_budget=self._compute_token_budget(prompt, response_style=response_style),
-                context_messages=len(self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns)),
+                token_budget=token_budget,
+                context_messages=context_messages,
+                input_tokens=in_tokens,
+                output_tokens=out_tokens,
                 used_model=response.used_model,
                 model_locked=False,
                 response_style=response_style,
@@ -241,8 +288,8 @@ class OpenClawService:
                 source="openai_direct",
                 latency_ms=latency_ms,
                 cache_hit=False,
-                token_budget=self._compute_token_budget(prompt, response_style=response_style),
-                context_messages=len(self._sanitize_history(history or [], max_turns=self.settings.openclaw_context_turns)),
+                token_budget=token_budget,
+                context_messages=context_messages,
                 used_model=normalized_model,
                 model_locked=False,
                 response_style=response_style,
@@ -421,6 +468,8 @@ class OpenClawService:
                 cache_hit=True,
                 token_budget=res.token_budget,
                 context_messages=res.context_messages,
+                input_tokens=res.input_tokens,
+                output_tokens=res.output_tokens,
                 used_model=res.used_model,
                 model_locked=res.model_locked,
                 response_style=res.response_style,
@@ -437,7 +486,7 @@ class OpenClawService:
 
     def _resolve_model(self, requested_model: str | None) -> str:
         configured = self.settings.openclaw_model.strip()
-        if self.settings.openclaw_force_model:
+        if self.settings.openclaw_force_model and self.is_enabled():
             return configured
         return (requested_model or configured).strip()
 
@@ -446,3 +495,16 @@ class OpenClawService:
         if isinstance(val, str) and val.strip():
             return val.strip()
         return fallback
+
+    def _extract_usage_tokens(self, raw: dict) -> tuple[int, int]:
+        usage = raw.get("usage")
+        if not isinstance(usage, dict):
+            return 0, 0
+        input_tokens = int(usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0)
+        output_tokens = int(usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0)
+        return input_tokens, output_tokens
+
+
+def _is_claude_model(model: str) -> bool:
+    low = model.lower()
+    return any(x in low for x in ("claude", "haiku", "sonnet", "opus"))

@@ -60,10 +60,10 @@ class ResponseOrchestrator:
                 intent=intent,
             )
 
-        selected = select_model(transcript, intent.category)
-        selected_model = str(selected.get("model") or "gpt-4o")
-        selected_mode = str(selected.get("mode") or "chat")
-        selected_reason = str(selected.get("reason") or "unknown")
+        selected = select_model(transcript)
+        selected_model = selected.model
+        selected_mode = selected.route
+        selected_reason = selected.reason
         logger.info(
             "MODEL_SELECTED model=%s mode=%s reason=%s",
             selected_model,
