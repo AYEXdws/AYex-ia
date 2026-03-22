@@ -819,6 +819,131 @@ def build_intel_context(service: IntelService, user_id: str, *, max_events: int 
     }
 
 
+def get_all_intel_for_llm(
+    service: "IntelService",
+    query: str,
+    user_id: str,
+    max_events: int = 15,
+) -> dict:
+    """Tüm güncel event'leri LLM'e verir. Filtreleme YAPMAZ.
+
+    LLM kendi analiz eder, çıkarım yapar, karşılaştırır.
+    Scoring/filtering LLM'in işi, kodun değil.
+    """
+    _ = user_id
+    events = list(service.store.get_all_events() or [])
+    if not events:
+        try:
+            events = list(_load_archive_events(service, lookback_days=2) or [])
+        except Exception:
+            events = []
+
+    if not events:
+        return {
+            "key_events": [],
+            "summary": "Henüz veri yok.",
+            "event_count": 0,
+            "categories": [],
+            "timeframe_info": "",
+            "timeframe_mode": "none",
+            "recency_note": "no_events",
+        }
+
+    sorted_events = sorted(
+        events,
+        key=lambda e: _event_to_utc(getattr(e, "timestamp", None)),
+        reverse=True,
+    )
+    selected = sorted_events[: max(1, min(60, int(max_events or 15)))]
+
+    categories: dict[str, list[str]] = {}
+    key_events: list[dict[str, object]] = []
+
+    for ev in selected:
+        title = str(getattr(ev, "title", "") or "").strip()
+        if not title:
+            continue
+        summary = str(getattr(ev, "summary", "") or "").strip()
+        category = str(getattr(ev, "category", "other") or "other").strip()
+        source = str(getattr(ev, "source", "unknown") or "unknown").strip()
+        timestamp = getattr(ev, "timestamp", None)
+        tags = list(getattr(ev, "tags", []) or [])[:5]
+        importance = int(getattr(ev, "importance", 0) or 0)
+
+        key_events.append(
+            {
+                "title": title,
+                "summary": summary[:300],
+                "category": category,
+                "source": source,
+                "tags": tags,
+                "importance": importance,
+                "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else "",
+            }
+        )
+        categories.setdefault(category or "other", []).append(title)
+
+    timeframe_info = ""
+    timeframe_mode = "none"
+    recency_note = "latest_events"
+    try:
+        timeframe_selection = select_intel_by_timeframe(service, query, fallback_events=events)
+        if isinstance(timeframe_selection, dict):
+            timeframe_mode = str(timeframe_selection.get("mode") or "none")
+            if timeframe_mode == "compare":
+                old_label = str(timeframe_selection.get("old_label") or "")
+                new_label = str(timeframe_selection.get("new_label") or "")
+                old_events = list(timeframe_selection.get("old_events") or [])
+                new_events = list(timeframe_selection.get("new_events") or [])
+                timeframe_info = f"KARSILASTIRMA: {old_label} ({len(old_events)} event) vs {new_label} ({len(new_events)} event)"
+                recency_note = f"{old_label} vs {new_label}".strip()
+
+                existing_titles = {str(item.get("title") or "").strip() for item in key_events}
+                for ev in old_events:
+                    title = str(getattr(ev, "title", "") or "").strip()
+                    if not title or title in existing_titles:
+                        continue
+                    summary = str(getattr(ev, "summary", "") or "").strip()
+                    category = str(getattr(ev, "category", "other") or "other").strip()
+                    timestamp = getattr(ev, "timestamp", None)
+                    source = str(getattr(ev, "source", "unknown") or "unknown").strip()
+                    tags = list(getattr(ev, "tags", []) or [])[:5]
+                    importance = int(getattr(ev, "importance", 0) or 0)
+                    key_events.append(
+                        {
+                            "title": title,
+                            "summary": summary[:300],
+                            "category": category,
+                            "source": source,
+                            "tags": tags,
+                            "importance": importance,
+                            "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else "",
+                            "time_context": old_label,
+                        }
+                    )
+                    existing_titles.add(title)
+                    categories.setdefault(category or "other", []).append(title)
+            elif timeframe_selection.get("label_text"):
+                timeframe_info = str(timeframe_selection.get("label_text") or "")
+                recency_note = timeframe_info
+    except Exception:
+        pass
+
+    category_list = sorted([str(c or "").strip() for c in categories.keys() if str(c or "").strip()])
+    category_summary = ", ".join([f"{cat} ({len(titles)})" for cat, titles in categories.items()])
+    summary_text = f"Toplam {len(key_events)} event. Kategoriler: {category_summary}" if key_events else "Henüz veri yok."
+
+    return {
+        "key_events": key_events,
+        "summary": summary_text[:1200],
+        "event_count": len(key_events),
+        "categories": category_list,
+        "timeframe_info": timeframe_info,
+        "timeframe_mode": timeframe_mode,
+        "recency_note": recency_note,
+    }
+
+
 def select_relevant_intel_context(
     service: IntelService,
     query: str,

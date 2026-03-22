@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from backend.src.intel.intel_service import build_intel_context, select_relevant_intel_context
+from backend.src.intel.intel_service import build_intel_context, get_all_intel_for_llm
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
@@ -148,8 +148,7 @@ def format_intel_for_prompt(intel_data: dict) -> str:
     if not events:
         return ""
 
-    lines = []
-    for ev in events:
+    def _event_block(ev: dict[str, Any]) -> str:
         title = ev.get("title", "")
         summary = ev.get("summary", "")
         category = ev.get("category", "")
@@ -157,9 +156,9 @@ def format_intel_for_prompt(intel_data: dict) -> str:
         timestamp = ev.get("timestamp", "")
         time_context = ev.get("time_context", "")
 
-        parts = [f"- {title}"]
+        parts = [str(title).strip()]
         if summary:
-            parts.append(f"  {summary}")
+            parts.append(str(summary).strip())
         meta = []
         if category:
             meta.append(category)
@@ -170,10 +169,60 @@ def format_intel_for_prompt(intel_data: dict) -> str:
         if time_context:
             meta.append(time_context)
         if meta:
-            parts.append(f"  [{', '.join(meta)}]")
-        lines.append("\n".join(parts))
+            parts.append(f"[{', '.join([str(x).strip() for x in meta if str(x).strip()])}]")
+        return "\n".join([p for p in parts if str(p).strip()])
 
-    return "\n\n".join(lines)
+    def _group_name(ev: dict[str, Any]) -> str:
+        category_norm = _normalize_text(str(ev.get("category", "") or "")).strip()
+        blob = _normalize_text(
+            " ".join(
+                [
+                    str(ev.get("title", "") or ""),
+                    str(ev.get("summary", "") or ""),
+                    " ".join([str(t) for t in (ev.get("tags") or [])]),
+                ]
+            )
+        )
+        if category_norm in {"security", "cyber", "cybersecurity", "siber", "guvenlik"}:
+            return "SIBER GUVENLIK"
+        if category_norm in {"global", "world", "dunya", "geopolitik", "geopolitic"}:
+            return "DUNYA HABERLERI"
+        if category_norm in {"tech", "technology", "teknoloji"}:
+            return "TEKNOLOJI"
+        if category_norm in {"economy", "market", "crypto", "finance", "finans", "makro"}:
+            if any(k in blob for k in ("btc", "bitcoin", "eth", "ethereum", "xrp", "bnb", "sol", "coin", "kripto", "crypto")):
+                return "KRIPTO"
+            if any(k in blob for k in ("hisse", "stock", "nasdaq", "nyse", "nvda", "aapl", "tsla", "msft", "googl")):
+                return "HISSE SENEDI"
+            if any(k in blob for k in ("dolar", "euro", "altin", "gumus", "petrol", "enflasyon", "faiz", "kur")):
+                return "MAKRO EKONOMI"
+            return "EKONOMI"
+        if category_norm:
+            return category_norm.upper()
+        return "DIGER"
+
+    if len(events) <= 10:
+        lines = [_event_block(ev) for ev in events]
+        return "\n\n".join([line for line in lines if line.strip()])
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    group_order: list[str] = []
+    for ev in events:
+        g = _group_name(ev)
+        if g not in grouped:
+            grouped[g] = []
+            group_order.append(g)
+        grouped[g].append(ev)
+
+    blocks: list[str] = []
+    for g in group_order:
+        rows = [_event_block(ev) for ev in grouped.get(g, [])]
+        rows = [r for r in rows if r.strip()]
+        if not rows:
+            continue
+        blocks.append(f"{g}:\n\n" + "\n\n".join(rows))
+
+    return "\n\n".join(blocks)
 
 
 def extract_user_focus(services: BackendServices, session_id: str, current_text: str) -> str:
@@ -656,14 +705,48 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         if any(kw in low for kw in data_keywords):
             intel_query = True
             logger.info("INTEL_MODE_FORCED reason=data_keyword_match")
+    # Basit sohbet kontrolü — bu mesajlarda intel verme
+    CASUAL_PATTERNS = (
+        "merhaba",
+        "selam",
+        "nasılsın",
+        "nasilsin",
+        "naber",
+        "hey",
+        "hi",
+        "hello",
+        "teşekkür",
+        "tesekkur",
+        "sağol",
+        "sagol",
+        "eyvallah",
+        "tamam",
+        "ok",
+        "anladım",
+        "anladim",
+        "görüşürüz",
+        "gorusuruz",
+        "bye",
+        "hoşçakal",
+        "hoscakal",
+        "iyi geceler",
+        "iyi günler",
+        "gunaydın",
+        "gunaydin",
+    )
+    low_text = _normalize_text(text).strip()
+    is_casual = any(low_text.startswith(_normalize_text(p)) or low_text == _normalize_text(p) for p in CASUAL_PATTERNS) and len(text) < 30
+    if not is_casual and latest_event_count > 0:
+        intel_query = True
+        logger.info("INTEL_ALWAYS_ON reason=events_available count=%d", latest_event_count)
     relevant_intel_context: dict[str, Any] = {}
     if intel_query:
         try:
-            relevant_intel_context = select_relevant_intel_context(
+            relevant_intel_context = get_all_intel_for_llm(
                 services.intel,
                 query=text,
                 user_id=user_id,
-                max_events=5,
+                max_events=15,
             )
         except Exception as exc:
             logger.info("CHAT_INTEL_SELECT_ERROR error=%s", exc)
@@ -711,19 +794,28 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
         logger.info("MEMORY_USED route=chat hits=%s", memory_hits)
 
     tool_result = services.tools.route_and_run(intent=intent.category, text=text)
-    tool_context = tool_result.evidence_text()
+    tool_evidence = (tool_result.evidence_text() or "").strip()
     if tool_result.has_data:
         services.long_memory.append_event(
             event_type=f"tool:{tool_result.selected_tool or intent.category}",
-            payload={"query": text, "evidence": tool_context[:3000]},
+            payload={"query": text, "evidence": tool_evidence[:3000]},
             source="tool_router",
             user_id=user_id,
         )
 
     merged_memory = "\n\n".join([x for x in [memory_context, long_memory_text] if x.strip()])
-    model_input = text
-    if tool_context:
-        model_input = f"Kullanici sorusu: {text}\n\nTool kaniti:\n{tool_context}"
+    tool_evidence_low = tool_evidence.lower()
+    if (
+        tool_evidence
+        and len(tool_evidence.strip()) > 20
+        and "ulaşılamadı" not in tool_evidence_low
+        and "ulasilamadi" not in _normalize_text(tool_evidence_low)
+        and "hata" not in tool_evidence_low
+        and "failed" not in tool_evidence_low
+    ):
+        model_input = f"{text}\n\nEK VERI:\n{tool_evidence}"
+    else:
+        model_input = text
     profile_prompt_base = services.profile.prompt_context()
     if summary_memory_context:
         profile_prompt_base = f"{profile_prompt_base}\n\n{summary_memory_context}"
@@ -751,6 +843,21 @@ Sana güncel veriler verilecek. Bu verilerle:
 - Spesifik soru gelirse (BTC ne durumda) sadece o konuya odaklan, gereksiz bilgi ekleme.
 - Eski ve yeni veri arasındaki değişimi fark et, trendi yorumla.
 - "Elimde X var ama Y yok" diyebilirsin, bu dürüstlük.
+
+SENIN ELINDEKI VERILER:
+Sana kategorilere ayrılmış güncel istihbarat verileri veriliyor. Bu veriler n8n feed'lerinden geliyor:
+
+Kripto: BTC, ETH, XRP, BNB, SOL fiyatları (15 dk aralıklarla güncelleniyor)
+Siber Güvenlik: The Hacker News'den son haberler
+Dünya Haberleri: BBC World'den son gelişmeler
+Makro Ekonomi: Altın, döviz kurları
+Hisse Senedi: NVDA, AAPL, TSLA, MSFT, GOOGL ve diğerleri
+
+BU VERILERI KULLAN. "Elimde veri yok" deme — sana verilen event'ler gerçek ve güncel.
+Fiyat sorulduğunda event'lerdeki rakamları kullan.
+Analiz istendiğinde tüm event'leri birlikte değerlendir.
+Karşılaştırma istendiğinde farklı zaman damgalarına bak.
+"CoinGecko'ya git" gibi yönlendirme YAPMA — veri zaten sende.
 
 {_build_intel_injection_text(intel_context) if intel_context else ""}
 
