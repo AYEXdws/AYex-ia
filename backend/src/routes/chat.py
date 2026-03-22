@@ -231,8 +231,89 @@ def is_intel_query(text: str) -> bool:
             "guvenlik",
             "saldiri",
         ),
+        (
+            "piyasa",
+            "piyasalar",
+            "borsa",
+            "hisse",
+            "coin",
+            "kripto",
+            "bitcoin",
+            "btc",
+            "eth",
+            "ethereum",
+            "solana",
+            "sol",
+            "xrp",
+            "bnb",
+            "dolar",
+            "euro",
+            "altın",
+            "altin",
+            "gümüş",
+            "gumus",
+            "petrol",
+            "emtia",
+            "kur",
+            "faiz",
+            "enflasyon",
+            "fiyat",
+            "fiyatlar",
+            "değer",
+            "deger",
+            "düşüş",
+            "dusus",
+            "yükseliş",
+            "yukselis",
+            "artış",
+            "artis",
+            "düştü",
+            "dustu",
+            "çıktı",
+            "cikti",
+            "almalıyım",
+            "almali",
+            "satmalıyım",
+            "satmali",
+            "yatırım",
+            "yatirim",
+            "portföy",
+            "portfolio",
+            "kazanç",
+            "kazanc",
+            "zarar",
+            "kar",
+            "risk",
+            "analiz",
+            "strateji",
+            "tahmin",
+            "trend",
+            "hacim",
+            "volume",
+            "market",
+            "pazar",
+            "ekonomi",
+            "makro",
+            "fear",
+            "greed",
+            "bull",
+            "bear",
+            "rally",
+            "crash",
+            "pump",
+            "dump",
+            "price",
+            "stock",
+            "crypto",
+            "invest",
+            "trade",
+            "currency",
+            "gold",
+            "oil",
+            "economy",
+        ),
     )
-    if any(k in low for group in keyword_groups for k in group):
+    if any(_normalize_text(k) in low for group in keyword_groups for k in group):
         return True
     analysis_patterns = (
         r"\bwhat is happening\b",
@@ -264,8 +345,31 @@ def is_general_news_query(text: str) -> bool:
         "son dakika",
         "gelismeler",
         "piyasalar",
+        "piyasa nasıl",
+        "piyasalar nasıl",
+        "borsa nasıl",
+        "kripto nasıl",
+        "coin nasıl",
+        "ekonomi nasıl",
+        "durum ne",
+        "durum nedir",
+        "son durum",
+        "ne durumda",
+        "nasıl gidiyor",
+        "ne oldu",
+        "ne oluyor",
+        "neler oluyor",
+        "ne değişti",
+        "ne degisti",
+        "gündem",
+        "güncel",
+        "gelişme",
+        "gelisme",
+        "son gelişmeler",
+        "haberler",
+        "son haberler",
     )
-    return any(token in low for token in news_triggers)
+    return any(_normalize_text(token) in low for token in news_triggers)
 
 
 def detect_tone(user_message: str) -> str:
@@ -525,7 +629,33 @@ def chat(payload: ChatRequest, request: Request, services: BackendServices = Dep
     logger.info("CHAT_LATEST_EVENTS count=%s", latest_event_count)
     general_news_query = is_general_news_query(text)
     aggressive_news_mode = bool(general_news_query and latest_event_count > 0)
+    # Intel mode: herhangi bir veri sorgusu varsa tetikle
     intel_query = bool(is_intel_query(text) or aggressive_news_mode)
+    # Ek kontrol: event store'da veri varsa ve kullanıcı ilgili bir şey soruyorsa
+    if not intel_query and latest_event_count > 0:
+        low = text.lower()
+        data_keywords = (
+            "piyasa",
+            "borsa",
+            "coin",
+            "kripto",
+            "bitcoin",
+            "btc",
+            "eth",
+            "dolar",
+            "altın",
+            "altin",
+            "hisse",
+            "fiyat",
+            "ne durumda",
+            "nasıl",
+            "durum",
+            "ekonomi",
+            "market",
+        )
+        if any(kw in low for kw in data_keywords):
+            intel_query = True
+            logger.info("INTEL_MODE_FORCED reason=data_keyword_match")
     relevant_intel_context: dict[str, Any] = {}
     if intel_query:
         try:
