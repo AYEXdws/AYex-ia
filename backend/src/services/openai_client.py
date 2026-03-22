@@ -49,6 +49,7 @@ class OpenAIDirectClient:
         instructions: str,
         max_output_tokens: int,
         route_name: str,
+        temperature: float | None = 0.2,
     ) -> OpenAIChatResult:
         started = time.perf_counter()
         original_model = (model or "").strip()
@@ -64,13 +65,18 @@ class OpenAIDirectClient:
 
         try:
             client = self._client_instance()
+            call_params: dict[str, Any] = {
+                "model": normalized_model,
+                "input": prompt,
+                "instructions": instructions,
+                "max_output_tokens": max_output_tokens,
+                "store": False,
+            }
+            if temperature is not None:
+                call_params["temperature"] = temperature
+
             response = client.responses.create(
-                model=normalized_model,
-                input=prompt,
-                instructions=instructions,
-                max_output_tokens=max_output_tokens,
-                temperature=0.2,
-                store=False,
+                **call_params,
             )
             raw = response.model_dump() if hasattr(response, "model_dump") else {}
             text = self._extract_text(raw).strip()

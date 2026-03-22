@@ -4,6 +4,9 @@ import json
 from urllib import request as urlrequest
 
 from backend.src.tools.base import ToolExecution, ToolInput, ToolOutput
+from backend.src.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class MarketTool:
@@ -39,7 +42,13 @@ class MarketTool:
                 error=None,
             )
         except Exception as exc:
-            return ToolExecution(name=self.name, input=tool_input, output=None, error=str(exc))
+            logger.warning("MARKET_TOOL_FAILED error=%s", str(exc))
+            return ToolExecution(
+                name=self.name,
+                input=tool_input,
+                output=ToolOutput(data={}, summary="Canli piyasa verisine ulasilamadi."),
+                error=None,
+            )
 
     def _fetch_json(self, url: str) -> dict | list:
         req = urlrequest.Request(url, headers={"User-Agent": "AYEX-IA/1.0"})

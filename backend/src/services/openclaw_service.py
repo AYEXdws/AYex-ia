@@ -252,12 +252,17 @@ class OpenClawService:
                 profile_context=profile_context,
                 memory_context=memory_context,
             )
+            # GPT-5 does not support temperature.
+            response_temperature: float | None = 0.2
+            if "gpt-5" in str(normalized_model or "").lower():
+                response_temperature = None
             response = self.openai.call_responses(
                 prompt=enriched,
                 model=model_name,
                 instructions=system_prompt,
                 max_output_tokens=token_budget,
                 route_name=route_name,
+                temperature=response_temperature,
             )
             in_tokens, out_tokens = self._extract_usage_tokens(response.raw)
             return OpenClawResult(
