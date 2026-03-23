@@ -436,6 +436,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
     history = services.chat_store.model_context(session.id, turns=services.settings.model_context_turns)
+    live_data_query = _is_live_data_query(text)
 
     query_ctx = build_query_context(
         services,
@@ -510,7 +511,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             if str(part or "").strip()
         ]
     )
-    combined_memory_context = query_ctx.merged_memory
+    combined_memory_context = "" if live_data_query else query_ctx.merged_memory
     used_model_for_reply = str(payload.model or "").strip() or model_selection.model
     # Power sorularda iki model birlikte calisir:
     # Sonnet analiz cikarir, Power model son karari verir.

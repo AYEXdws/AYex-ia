@@ -316,6 +316,17 @@ def is_general_news_query(text: str) -> bool:
         "ozet",
         "brief",
         "rapor",
+        "canli veri",
+        "canlı veri",
+        "guncel veri",
+        "güncel veri",
+        "hangi feed",
+        "hangi veriler var",
+        "elinde ki canli veriler",
+        "elindeki canli veriler",
+        "elindeki canlı veriler",
+        "neler goruyorsun",
+        "neler görüyorsun",
     ]
     q = _normalize_text(text)
     return any(kw in q for kw in general_keywords)

@@ -146,3 +146,40 @@ def test_select_relevant_intel_context_prefers_macro_source_over_profile_crypto_
     assert ctx["key_events"]
     assert ctx["key_events"][0]["source"] == "er_api"
     assert "Makro Ozet" in ctx["key_events"][0]["title"]
+
+
+def test_select_relevant_intel_context_treats_live_inventory_query_as_general_feed_request():
+    service = IntelService(IntelStore())
+    now = datetime.now(timezone.utc)
+    service.create_event(
+        title="Kripto Piyasasi: BTC $70.67K | +3.66% (24s)",
+        summary="BTC ve SOL guclu.",
+        category="economy",
+        importance=8,
+        source="coingecko",
+        timestamp=now - timedelta(minutes=5),
+        tags=["kripto", "btc"],
+    )
+    service.create_event(
+        title="Makro Ozet: USD/TRY 44.34 | EUR/TRY 51.25",
+        summary="Kur ve altin birlikte yukari.",
+        category="economy",
+        importance=9,
+        source="er_api",
+        timestamp=now - timedelta(minutes=3),
+        tags=["makro", "usdtry"],
+    )
+    service.create_event(
+        title="Russian attacks kill six in Ukraine, officials say",
+        summary="Gece saldirilarinda can kaybi var.",
+        category="global",
+        importance=8,
+        source="bbc_world",
+        timestamp=now - timedelta(minutes=20),
+        tags=["war", "ukraine"],
+    )
+
+    ctx = select_relevant_intel_context(service, "şuan elinde ki canlı veriler nelerdir", user_id="ayex", max_events=5)
+
+    assert ctx["key_events"]
+    assert {item["source"] for item in ctx["key_events"]} >= {"coingecko", "er_api", "bbc_world"}
