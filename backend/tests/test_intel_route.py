@@ -110,7 +110,9 @@ def test_public_intel_exposes_curated_sections():
 
     assert payload["brand"] == "AYEXDWS"
     assert payload["overview"]["stats"]["active_feeds"] >= 2
+    assert payload["overview"]["stats"]["published_events"] >= 3
     assert len(payload["pulse"]) >= 3
+    assert payload["changed_today"]
     sections = {section["key"]: section for section in payload["sections"]}
     assert {"crypto", "equities", "macro", "world", "cyber"} <= set(sections)
     assert sections["crypto"]["items"]

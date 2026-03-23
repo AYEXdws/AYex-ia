@@ -9,10 +9,10 @@ export default function SessionRail({ sessions, selectedSessionId, onSelectSessi
       transition={{ delay: 0.08 }}
     >
       <div className="border-b border-[var(--line)] px-4 py-5">
-        <div className="section-kicker">Session Memory</div>
+        <div className="section-kicker">Oturum Zinciri</div>
         <div className="panel-title mt-2 text-2xl text-[var(--text)]">Oturumlar</div>
         <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-          Gecmis konusmalari ac. AYEX baglami sadece son mesaja degil, oturum zincirine de yaslanabilsin.
+          Gecmis akisi ac. Mevcut soruyu sadece son mesaja degil, tum oturum dizisine bagla.
         </p>
         <button
           onClick={onNewSession}

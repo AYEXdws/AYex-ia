@@ -36,6 +36,7 @@ export default function PublicPage({ onNavigateIA }) {
 
   const sections = useMemo(() => Array.isArray(surface?.sections) ? surface.sections : [], [surface]);
   const pulse = useMemo(() => Array.isArray(surface?.pulse) ? surface.pulse : [], [surface]);
+  const changedToday = useMemo(() => Array.isArray(surface?.changed_today) ? surface.changed_today : [], [surface]);
   const stats = surface?.overview?.stats || {};
 
   return (
@@ -86,7 +87,7 @@ export default function PublicPage({ onNavigateIA }) {
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
               <MetricCard label="Aktif akis" value={stats.active_feeds ?? '-'} />
-              <MetricCard label="24 saat event" value={stats.events_24h ?? '-'} />
+              <MetricCard label="Yayinda event" value={stats.published_events ?? '-'} />
               <MetricCard label="Agirlik merkezi" value={stats.lead_domain || '-'} />
             </div>
 
@@ -128,6 +129,35 @@ export default function PublicPage({ onNavigateIA }) {
             {error}
           </div>
         ) : null}
+
+        <section className="public-shell px-5 py-5">
+          <div className="mb-4 flex items-end justify-between gap-4">
+            <div>
+              <div className="section-kicker">Bugun Degisenler</div>
+              <h2 className="panel-title mt-2 text-3xl text-[var(--text)]">Bugunun secilmis akisi</h2>
+            </div>
+            <div className="text-sm text-[var(--muted)]">Ayni omurgadan secilen son degisimler</div>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
+            {changedToday.length ? (
+              changedToday.map((item) => (
+                <div key={`${item.section}-${item.title}`} className="feed-item">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--accent-strong)]">{item.section}</div>
+                    <div className="text-[11px] tracking-[0.12em] text-[var(--muted)]">{formatTimestamp(item.timestamp)}</div>
+                  </div>
+                  <div className="mt-3 text-sm font-semibold leading-6 text-[var(--text)]">{item.title}</div>
+                  <div className="mt-3 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                    <span>{item.source}</span>
+                    <span>score {formatScore(item.score)}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="feed-item text-sm text-[var(--muted)]">Yayinlanacak degisim henuz secilmedi.</div>
+            )}
+          </div>
+        </section>
 
         <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {sections.map((section, index) => (
@@ -224,4 +254,10 @@ function formatTimestamp(value) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function formatScore(value) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return '-';
+  return score.toFixed(2);
 }

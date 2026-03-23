@@ -162,25 +162,47 @@ export default function SystemPage({ onNavigateHome }) {
             </form>
           </section>
         ) : (
-          <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[280px_minmax(0,1fr)_340px]">
-            <SessionRail
-              sessions={sessions}
-              selectedSessionId={selectedSessionId}
-              onSelectSession={setSelectedSessionId}
-              onNewSession={() => setSelectedSessionId('')}
-            />
-            <ChatPanel
-              token={token}
-              selectedSessionId={selectedSessionId}
-              onSessionChange={setSelectedSessionId}
-              onStatus={setStatus}
-              onRefreshSurface={loadSurface}
-              onInsight={setInsight}
-            />
-            <StatusPanel status={status} intelBrief={intelBrief} insight={insight} onLogout={logout} />
-          </section>
+          <>
+            <section className="glass-card flex flex-wrap items-stretch gap-3 px-4 py-4">
+              <PulseCell label="Kripto" value={intelBrief?.live_inventory?.feeds?.crypto?.freshness} detail={intelBrief?.market_focus?.crypto?.summary} />
+              <PulseCell label="Hisse" value={intelBrief?.live_inventory?.feeds?.equities?.freshness} detail={intelBrief?.market_focus?.equities?.summary} />
+              <PulseCell label="Makro" value={intelBrief?.live_inventory?.feeds?.macro?.freshness} detail={intelBrief?.market_focus?.macro?.summary} />
+              <PulseCell label="World" value={intelBrief?.live_inventory?.feeds?.world?.freshness} detail={intelBrief?.domain_focus?.world?.summary} />
+              <PulseCell label="Cyber" value={intelBrief?.live_inventory?.feeds?.cyber?.freshness} detail={intelBrief?.domain_focus?.cyber?.summary} />
+            </section>
+
+            <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[280px_minmax(0,1fr)_340px]">
+              <SessionRail
+                sessions={sessions}
+                selectedSessionId={selectedSessionId}
+                onSelectSession={setSelectedSessionId}
+                onNewSession={() => setSelectedSessionId('')}
+              />
+              <ChatPanel
+                token={token}
+                selectedSessionId={selectedSessionId}
+                onSessionChange={setSelectedSessionId}
+                onStatus={setStatus}
+                onRefreshSurface={loadSurface}
+                onInsight={setInsight}
+              />
+              <StatusPanel status={status} intelBrief={intelBrief} insight={insight} onLogout={logout} />
+            </section>
+          </>
         )}
       </div>
     </motion.main>
+  );
+}
+
+function PulseCell({ label, value, detail }) {
+  return (
+    <div className="min-w-[180px] flex-1 rounded-[22px] border border-[var(--line)] bg-white/[0.03] px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">{label}</div>
+        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--accent-strong)]">{value || 'unknown'}</div>
+      </div>
+      <div className="mt-2 text-sm leading-6 text-[var(--text)]">{detail || 'Sinyal yok.'}</div>
+    </div>
   );
 }
