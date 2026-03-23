@@ -220,7 +220,7 @@ def build_decision_prompt_block(decision: dict[str, Any] | None) -> str:
     return "\n\n".join(parts).strip()
 
 
-def enforce_decision_reply(*, decision: dict[str, Any] | None, reply: str) -> str:
+def enforce_decision_reply(*, decision: dict[str, Any] | None, reply: str, strict: bool = False) -> str:
     row = dict(decision or {})
     text = str(reply or "").strip()
     if not row.get("active"):
@@ -233,10 +233,30 @@ def enforce_decision_reply(*, decision: dict[str, Any] | None, reply: str) -> st
         headline = f"Ahmet, su an izlemeye en deger aday {asset}, ama giris icin acele etme."
     else:
         headline = "Ahmet, su an net edge yok. Beklemek daha dogru."
+    reasons = [str(item).strip() for item in (row.get("reasons") or []) if str(item).strip()]
+    risks = [str(item).strip() for item in (row.get("risks") or []) if str(item).strip()]
     normalized_headline = _normalize(headline)
+    base_lines = [headline]
+    if reasons:
+        base_lines.append("Neden: " + " ".join(reasons[:2]))
+    if risks:
+        base_lines.append("Risk: " + risks[0])
+
+    if not text:
+        return "\n".join(base_lines)
+
+    if strict:
+        if _normalize(text).startswith(normalized_headline):
+            return "\n".join(base_lines + ([text] if len(text) > len(headline) + 12 else []))
+        return "\n".join(base_lines + [text])
+
     if _normalize(text).startswith(normalized_headline):
         return text
     return f"{headline}\n\n{text}" if text else headline
+
+
+def is_market_decision_query(text: str) -> bool:
+    return _is_market_decision_query(_normalize(text))
 
 
 def _score_event(

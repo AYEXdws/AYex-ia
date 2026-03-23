@@ -109,11 +109,15 @@ def test_enforce_decision_reply_prepends_clear_headline():
         "asset": "SOL",
         "stance": "buy",
         "summary": "Ahmet, su an en mantikli secenek SOL.",
+        "reasons": ["Momentum daha temiz.", "Kanit daha taze."],
+        "risks": ["Ani geri cekilme riski var."],
     }
 
-    out = enforce_decision_reply(decision=decision, reply="Momentum daha temiz ve kanit daha taze duruyor.")
+    out = enforce_decision_reply(decision=decision, reply="Momentum daha temiz ve kanit daha taze duruyor.", strict=True)
 
     assert out.startswith("Ahmet, su an en mantikli secenek SOL.")
+    assert "Neden:" in out
+    assert "Risk:" in out
 
 
 def test_proactive_briefing_returns_compare_and_priorities():

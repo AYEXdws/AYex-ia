@@ -11,7 +11,13 @@ from fastapi import APIRouter, Depends, Request
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
-from backend.src.services.market_decision import build_decision_prompt_block, build_market_decision, enforce_decision_reply
+from backend.src.services.live_feed_status import build_live_inventory, render_live_inventory_reply
+from backend.src.services.market_decision import (
+    build_decision_prompt_block,
+    build_market_decision,
+    enforce_decision_reply,
+    is_market_decision_query,
+)
 from backend.src.services.model_router import ModelSelection, select_model
 from backend.src.services.proactive_briefing import build_proactive_briefing
 from backend.src.services.query_context import build_explainability_trace, build_query_context, collect_tool_evidence
@@ -249,6 +255,25 @@ def _is_live_data_query(text: str) -> bool:
     return any(marker in low for marker in markers)
 
 
+def _should_suppress_memory(text: str) -> bool:
+    if _is_live_data_query(text):
+        return True
+    low = _normalize_reply(text)
+    current_domain_markers = (
+        "guncel makro",
+        "güncel makro",
+        "makro tarafta",
+        "siber tarafta",
+        "cyber tarafta",
+        "dunya tarafinda",
+        "world tarafinda",
+        "son durum ne",
+        "su an ne oluyor",
+        "şu an ne oluyor",
+    )
+    return any(marker in low for marker in current_domain_markers)
+
+
 def _event_reference_tokens(key_events: list[dict[str, Any]]) -> set[str]:
     stop = {
         "ahmet",
@@ -322,6 +347,24 @@ def _build_grounded_reply(*, query_ctx: Any, decision: dict[str, Any] | None = N
         if tails:
             lines.append("Bunu destekleyen diger sinyaller: " + " | ".join(tails))
     return "\n\n".join([line for line in lines if line]).strip()
+
+
+def _build_live_data_response(*, services: BackendServices, session_id: str) -> ChatResponse:
+    latest_events = list(services.intel.get_latest_events(limit=40) or [])
+    live_inventory = build_live_inventory(latest_events)
+    reply = render_live_inventory_reply(latest_events)
+    services.chat_store.append_message(session_id, role="assistant", text=reply, source="live_inventory")
+    return ChatResponse(
+        reply=reply,
+        session_id=session_id,
+        metrics={
+            "source": "live_inventory",
+            "ok": True,
+            "route": "live_inventory",
+            "event_count": len(latest_events),
+            "live_inventory": live_inventory,
+        },
+    )
 
 
 def _enforce_grounded_intel_reply(*, reply: str, query_ctx: Any, decision: dict[str, Any] | None = None) -> str:
@@ -401,6 +444,10 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         )
 
     session = services.chat_store.ensure_session(payload.session_id, title_hint=text)
+    services.chat_store.append_message(session.id, role="user", text=text, source="user")
+    if _is_live_data_query(text):
+        return _build_live_data_response(services=services, session_id=session.id)
+
     dedup = None
     if not _is_live_data_query(text):
         dedup = services.chat_store.recent_assistant_for_duplicate(
@@ -413,7 +460,6 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         prev_metrics = dedup.get("metrics") or {}
         prev_ok = bool(prev_metrics.get("ok", True))
 
-        services.chat_store.append_message(session.id, role="user", text=text, source="user")
         services.chat_store.append_message(
             session.id,
             role="assistant",
@@ -433,8 +479,6 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
                 "event_count": int(prev_metrics.get("event_count", 0) or 0),
             },
         )
-
-    services.chat_store.append_message(session.id, role="user", text=text, source="user")
     history = services.chat_store.model_context(session.id, turns=services.settings.model_context_turns)
     live_data_query = _is_live_data_query(text)
 
@@ -511,7 +555,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             if str(part or "").strip()
         ]
     )
-    combined_memory_context = "" if live_data_query else query_ctx.merged_memory
+    combined_memory_context = "" if _should_suppress_memory(text) else query_ctx.merged_memory
     used_model_for_reply = str(payload.model or "").strip() or model_selection.model
     # Power sorularda iki model birlikte calisir:
     # Sonnet analiz cikarir, Power model son karari verir.
@@ -581,7 +625,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
 
     if not reply or len(reply) < 10:
         reply = "Bir sorun olustu, tekrar dene."
-    reply = enforce_decision_reply(decision=decision, reply=reply)
+    reply = enforce_decision_reply(decision=decision, reply=reply, strict=is_market_decision_query(text))
     reply = _enforce_grounded_intel_reply(reply=reply, query_ctx=query_ctx, decision=decision)
 
     latency_ms = int(getattr(result, "latency_ms", 0) or 0)

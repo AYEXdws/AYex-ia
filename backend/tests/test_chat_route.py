@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
-from backend.src.routes.chat import _enforce_grounded_intel_reply, _format_all_events, _is_live_data_query, chat
+from backend.src.routes.chat import _enforce_grounded_intel_reply, _format_all_events, _is_live_data_query, _should_suppress_memory, chat
 from backend.src.schemas import ChatRequest
 
 
@@ -66,6 +66,64 @@ class _FakeIntelStore:
         return list(self._events)
 
 
+class _FakeIntel:
+    def __init__(self):
+        self._events = [
+            SimpleNamespace(
+                title="Kripto Piyasasi: BTC $70.67K | +3.66% (24s)",
+                summary="BTC ve ETH guclu.",
+                category="economy",
+                source="coingecko",
+                timestamp=datetime.utcnow(),
+                tags=["kripto", "btc"],
+            ),
+            SimpleNamespace(
+                title="Hisse Senetleri: ASML +4.1% | TSLA +3.1%",
+                summary="ASML onde.",
+                category="economy",
+                source="yahoo_finance",
+                timestamp=datetime.utcnow(),
+                tags=["hisse", "asml"],
+            ),
+            SimpleNamespace(
+                title="Makro Ozet: USD/TRY 44.34 | EUR/TRY 51.25",
+                summary="Kur baskisi suruyor.",
+                category="economy",
+                source="er_api",
+                timestamp=datetime.utcnow(),
+                tags=["makro", "usdtry"],
+            ),
+            SimpleNamespace(
+                title="Russian attacks kill six in Ukraine, officials say",
+                summary="Jeopolitik risk suruyor.",
+                category="global",
+                source="bbc_world",
+                timestamp=datetime.utcnow(),
+                tags=["war"],
+            ),
+            SimpleNamespace(
+                title="Oracle Patches Critical CVE-2026-21992",
+                summary="Critical RCE yamasi yayinlandi.",
+                category="security",
+                source="the_hacker_news",
+                timestamp=datetime.utcnow(),
+                tags=["cve", "rce"],
+            ),
+        ]
+        self.store = _FakeIntelStore(self._events)
+
+    def get_latest_events(self, limit: int = 10):
+        return self._events[:limit]
+
+    def get_daily_brief(self, user_id: str = "default"):
+        _ = user_id
+        return {"daily_brief": "Gunluk brief hazir.", "insights": []}
+
+    def filter_by_user_profile(self, events, user_id: str = "default"):
+        _ = user_id
+        return list(events)
+
+
 class _FakeMemory:
     def get_memory_context(self, text):
         _ = text
@@ -124,7 +182,8 @@ class _FakeServices:
             timestamp=datetime.utcnow(),
             tags=["btc"],
         )
-        self.intel = SimpleNamespace(store=_FakeIntelStore([ev]))
+        self.intel = _FakeIntel()
+        self.intel.store = _FakeIntelStore([ev])
         self.memory = _FakeMemory()
         self.profile = _FakeProfile()
         self.model = _FakeModel(text=model_text)
@@ -253,5 +312,27 @@ def test_chat_skips_duplicate_cache_for_live_data_queries():
     out = asyncio.run(chat(payload, _FakeRequest(), services=services))
 
     assert services.chat_store.duplicate_calls == 0
-    assert services.model.calls == 1
+    assert services.model.calls == 0
     assert "canli veri yok" not in out.reply.lower()
+
+
+def test_should_suppress_memory_for_current_state_queries():
+    assert _should_suppress_memory("şuan elinde ki canlı veriler nelerdir")
+    assert _should_suppress_memory("guncel makro tarafta ne oluyor")
+    assert not _should_suppress_memory("ayex projesi hakkinda ne dusunuyorsun")
+
+
+def test_chat_live_inventory_query_bypasses_model_and_lists_feeds():
+    services = _FakeServices()
+    services.intel = _FakeIntel()
+    payload = ChatRequest(text="şuan elinde ki canlı veriler nelerdir")
+
+    out = asyncio.run(chat(payload, _FakeRequest(), services=services))
+
+    assert out.metrics.get("route") == "live_inventory"
+    assert services.model.calls == 0
+    assert "Kripto: aktif" in out.reply
+    assert "Hisse: aktif" in out.reply
+    assert "Makro: aktif" in out.reply
+    assert "World: aktif" in out.reply
+    assert "Cyber: aktif" in out.reply
