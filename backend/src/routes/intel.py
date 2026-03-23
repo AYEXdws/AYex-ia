@@ -6,7 +6,7 @@ from backend.src.intel.intel_service import select_relevant_intel_context
 from backend.src.routes.deps import get_services
 from backend.src.services.container import BackendServices
 from backend.src.services.live_feed_status import build_live_inventory, build_source_focus
-from backend.src.services.market_decision import build_market_decision
+from backend.src.services.market_decision import build_asset_signal_board, build_market_decision
 from backend.src.services.proactive_briefing import build_proactive_briefing
 
 router = APIRouter()
@@ -18,13 +18,24 @@ def intel_brief(request: Request, services: BackendServices = Depends(get_servic
     daily = services.intel.get_daily_brief(user_id=user_id)
     proactive = build_proactive_briefing(services.intel, user_id=user_id, limit=6)
     latest_events = list(services.intel.get_latest_events(limit=20) or [])
+    inventory_events = _inventory_events(services)
     return {
         **(daily or {}),
         "proactive": proactive,
         "market_focus": _build_market_focus(services=services, user_id=user_id, latest_events=latest_events),
-        "domain_focus": _build_domain_focus(latest_events),
-        "live_inventory": build_live_inventory(latest_events),
+        "domain_focus": _build_domain_focus(inventory_events),
+        "live_inventory": build_live_inventory(inventory_events),
     }
+
+
+def _inventory_events(services: BackendServices) -> list:
+    store = getattr(getattr(services, "intel", None), "store", None)
+    if store and hasattr(store, "get_all_events"):
+        try:
+            return list(getattr(store, "get_all_events")() or [])
+        except Exception:
+            pass
+    return list(getattr(services.intel, "get_latest_events")(limit=80) or [])
 
 
 def _build_market_focus(*, services: BackendServices, user_id: str, latest_events: list) -> dict:
@@ -45,6 +56,12 @@ def _build_market_focus(*, services: BackendServices, user_id: str, latest_event
             intel_context=intel_context,
             latest_events=latest_events,
         ).as_dict()
+        decisions[f"{key}_signals"] = build_asset_signal_board(
+            text=query,
+            intel_context=intel_context,
+            latest_events=latest_events,
+            limit=4,
+        )
     decisions["macro"] = _build_macro_focus(latest_events)
     return decisions
 
@@ -56,12 +73,18 @@ def _build_domain_focus(latest_events: list) -> dict:
             label="World",
             sources={"bbc_world", "reuters"},
             fallback="Dunya tarafinda taze bir event yok.",
+            fresh_hours=6.0,
+            watch_hours=24.0,
+            stale_hours=48.0,
         ),
         "cyber": build_source_focus(
             latest_events,
             label="Cyber",
             sources={"the_hacker_news"},
             fallback="Siber tarafta taze bir event yok.",
+            fresh_hours=12.0,
+            watch_hours=36.0,
+            stale_hours=72.0,
         ),
     }
 

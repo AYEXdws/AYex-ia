@@ -115,47 +115,12 @@ def build_market_decision(*, text: str, intel_context: dict[str, Any] | None = N
     if not _is_market_decision_query(normalized):
         return MarketDecision()
     scope = _detect_scope(normalized)
-
-    candidate_scores: dict[str, float] = {}
-    candidate_reasons: dict[str, list[str]] = {}
-    candidate_risks: dict[str, list[str]] = {}
-    candidate_evidence: dict[str, list[str]] = {}
-
-    explicit_assets = _assets_in_text(normalized)
-    if explicit_assets:
-        for asset in explicit_assets:
-            if not _asset_in_scope(asset, scope):
-                continue
-            candidate_scores.setdefault(asset, 0.2)
-
-    key_events = list((intel_context or {}).get("key_events") or [])
-    for item in key_events:
-        _score_event(
-            item,
-            scope=scope,
-            candidate_scores=candidate_scores,
-            candidate_reasons=candidate_reasons,
-            candidate_risks=candidate_risks,
-            candidate_evidence=candidate_evidence,
-        )
-
-    for event in list(latest_events or [])[:12]:
-        payload = {
-            "title": str(getattr(event, "title", "") or "").strip(),
-            "summary": str(getattr(event, "summary", "") or "").strip(),
-            "tags": list(getattr(event, "tags", []) or []),
-            "importance": int(getattr(event, "importance", 5) or 5),
-            "effective_score": float(getattr(event, "final_score", 0.0) or 0.0),
-            "timestamp": getattr(event, "timestamp", None).isoformat() if hasattr(getattr(event, "timestamp", None), "isoformat") else "",
-        }
-        _score_event(
-            payload,
-            scope=scope,
-            candidate_scores=candidate_scores,
-            candidate_reasons=candidate_reasons,
-            candidate_risks=candidate_risks,
-            candidate_evidence=candidate_evidence,
-        )
+    candidate_scores, candidate_reasons, candidate_risks, candidate_evidence = _collect_market_candidates(
+        scope=scope,
+        intel_context=intel_context,
+        latest_events=latest_events,
+        explicit_assets=_assets_in_text(normalized),
+    )
 
     if not candidate_scores:
         return MarketDecision(
@@ -166,6 +131,9 @@ def build_market_decision(*, text: str, intel_context: dict[str, Any] | None = N
             risks=("Gereksiz zorlanmis secim yapma riski var.",),
         )
 
+    candidate_reasons = {asset: _dedupe_lines(items) for asset, items in candidate_reasons.items()}
+    candidate_risks = {asset: _dedupe_lines(items) for asset, items in candidate_risks.items()}
+    candidate_evidence = {asset: _dedupe_lines(items) for asset, items in candidate_evidence.items()}
     ordered = sorted(candidate_scores.items(), key=lambda item: item[1], reverse=True)
     top_asset, top_score = ordered[0]
     second_score = ordered[1][1] if len(ordered) > 1 else -999.0
@@ -201,6 +169,98 @@ def build_market_decision(*, text: str, intel_context: dict[str, Any] | None = N
         risks=top_risks or ("Kisa vadede ani ters hareket riski devam ediyor.",),
         evidence=top_evidence,
     )
+
+
+def build_asset_signal_board(
+    *,
+    text: str,
+    intel_context: dict[str, Any] | None = None,
+    latest_events: list[Any] | None = None,
+    limit: int = 4,
+) -> list[dict[str, Any]]:
+    normalized = _normalize(text)
+    if not _is_market_decision_query(normalized):
+        return []
+    scope = _detect_scope(normalized)
+    candidate_scores, candidate_reasons, candidate_risks, candidate_evidence = _collect_market_candidates(
+        scope=scope,
+        intel_context=intel_context,
+        latest_events=latest_events,
+        explicit_assets=_assets_in_text(normalized),
+    )
+    out: list[dict[str, Any]] = []
+    for asset, score in sorted(candidate_scores.items(), key=lambda item: item[1], reverse=True)[: max(1, limit)]:
+        stance = "avoid"
+        if score >= 1.55:
+            stance = "buy"
+        elif score >= 1.0:
+            stance = "watch"
+        summary = f"{asset} icin net edge zayif."
+        if stance == "buy":
+            summary = f"{asset} su an guclu aday."
+        elif stance == "watch":
+            summary = f"{asset} izlemeye deger, ama teyit gerekli."
+        out.append(
+            {
+                "asset": asset,
+                "score": round(float(score), 3),
+                "stance": stance,
+                "summary": summary,
+                "reasons": _dedupe_lines(candidate_reasons.get(asset, []))[:3],
+                "risks": _dedupe_lines(candidate_risks.get(asset, []))[:2],
+                "evidence": _dedupe_lines(candidate_evidence.get(asset, []))[:3],
+            }
+        )
+    return out
+
+
+def _collect_market_candidates(
+    *,
+    scope: str,
+    intel_context: dict[str, Any] | None = None,
+    latest_events: list[Any] | None = None,
+    explicit_assets: list[str] | None = None,
+) -> tuple[dict[str, float], dict[str, list[str]], dict[str, list[str]], dict[str, list[str]]]:
+    candidate_scores: dict[str, float] = {}
+    candidate_reasons: dict[str, list[str]] = {}
+    candidate_risks: dict[str, list[str]] = {}
+    candidate_evidence: dict[str, list[str]] = {}
+
+    if explicit_assets:
+        for asset in explicit_assets:
+            if not _asset_in_scope(asset, scope):
+                continue
+            candidate_scores.setdefault(asset, 0.2)
+
+    key_events = list((intel_context or {}).get("key_events") or [])
+    for item in key_events:
+        _score_event(
+            item,
+            scope=scope,
+            candidate_scores=candidate_scores,
+            candidate_reasons=candidate_reasons,
+            candidate_risks=candidate_risks,
+            candidate_evidence=candidate_evidence,
+        )
+
+    for event in list(latest_events or [])[:16]:
+        payload = {
+            "title": str(getattr(event, "title", "") or "").strip(),
+            "summary": str(getattr(event, "summary", "") or "").strip(),
+            "tags": list(getattr(event, "tags", []) or []),
+            "importance": int(getattr(event, "importance", 5) or 5),
+            "effective_score": float(getattr(event, "final_score", 0.0) or 0.0),
+            "timestamp": getattr(event, "timestamp", None).isoformat() if hasattr(getattr(event, "timestamp", None), "isoformat") else "",
+        }
+        _score_event(
+            payload,
+            scope=scope,
+            candidate_scores=candidate_scores,
+            candidate_reasons=candidate_reasons,
+            candidate_risks=candidate_risks,
+            candidate_evidence=candidate_evidence,
+        )
+    return candidate_scores, candidate_reasons, candidate_risks, candidate_evidence
 
 
 def build_decision_prompt_block(decision: dict[str, Any] | None) -> str:
@@ -486,3 +546,18 @@ def _normalize(text: str) -> str:
     for src, dst in repl.items():
         out = out.replace(src, dst)
     return " ".join(out.split())
+
+
+def _dedupe_lines(items: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        cleaned = str(item or "").strip()
+        if not cleaned:
+            continue
+        key = _normalize(cleaned)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(cleaned)
+    return out

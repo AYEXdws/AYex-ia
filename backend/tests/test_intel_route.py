@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from backend.src.intel.event_model import IntelEvent
@@ -43,6 +43,17 @@ class _FakeIntel:
                 final_score=0.67,
                 confidence_score=0.75,
             ),
+            IntelEvent(
+                title="Oracle Patches Critical CVE-2026-21992",
+                summary="Critical RCE yamasi yayinlandi.",
+                category="security",
+                importance=9,
+                source="the_hacker_news",
+                tags=["cve", "rce", "critical"],
+                timestamp=datetime.utcnow() - timedelta(hours=18),
+                final_score=0.79,
+                confidence_score=0.75,
+            ),
         ]
         self.store = SimpleNamespace(get_all_events=lambda: list(self._events))
 
@@ -72,9 +83,13 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["market_focus"]["crypto"]["asset"] in {"BTC", "ETH", "SOL"}
     assert payload["market_focus"]["equities"]["active"] is True
     assert payload["market_focus"]["equities"]["asset"] in {"ASML", "TSLA"}
+    assert payload["market_focus"]["crypto_signals"]
+    assert payload["market_focus"]["equities_signals"]
     assert payload["market_focus"]["macro"]["active"] is True
     assert "Makro Ozet" in payload["market_focus"]["macro"]["summary"]
     assert payload["domain_focus"]["world"]["active"] is False
-    assert payload["domain_focus"]["cyber"]["active"] is False
+    assert payload["domain_focus"]["cyber"]["available"] is True
+    assert payload["domain_focus"]["cyber"]["freshness_state"] == "watch"
     assert payload["live_inventory"]["feeds"]["crypto"]["available"] is True
     assert payload["live_inventory"]["feeds"]["macro"]["available"] is True
+    assert payload["live_inventory"]["feeds"]["cyber"]["available"] is True

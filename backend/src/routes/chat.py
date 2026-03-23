@@ -350,9 +350,18 @@ def _build_grounded_reply(*, query_ctx: Any, decision: dict[str, Any] | None = N
 
 
 def _build_live_data_response(*, services: BackendServices, session_id: str) -> ChatResponse:
-    latest_events = list(services.intel.get_latest_events(limit=40) or [])
-    live_inventory = build_live_inventory(latest_events)
-    reply = render_live_inventory_reply(latest_events)
+    inventory_events: list[Any] = []
+    store = getattr(getattr(services, "intel", None), "store", None)
+    if store and hasattr(store, "get_all_events"):
+        try:
+            inventory_events = list(getattr(store, "get_all_events")() or [])
+        except Exception:
+            inventory_events = []
+    if not inventory_events:
+        inventory_events = list(services.intel.get_latest_events(limit=80) or [])
+
+    live_inventory = build_live_inventory(inventory_events)
+    reply = render_live_inventory_reply(inventory_events)
     services.chat_store.append_message(session_id, role="assistant", text=reply, source="live_inventory")
     return ChatResponse(
         reply=reply,
@@ -361,7 +370,7 @@ def _build_live_data_response(*, services: BackendServices, session_id: str) -> 
             "source": "live_inventory",
             "ok": True,
             "route": "live_inventory",
-            "event_count": len(latest_events),
+            "event_count": len(inventory_events),
             "live_inventory": live_inventory,
         },
     )

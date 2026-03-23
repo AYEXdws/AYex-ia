@@ -16,6 +16,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
   const proactive = intelBrief?.proactive || null;
   const marketFocus = intelBrief?.market_focus || null;
   const domainFocus = intelBrief?.domain_focus || null;
+  const liveInventory = intelBrief?.live_inventory?.feeds || null;
   return (
     <motion.aside
       className="glass-card h-full w-full p-5 md:p-6"
@@ -92,6 +93,12 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">ASSET SINYALLERI</div>
+        <SignalGroup label="Kripto" rows={marketFocus?.crypto_signals} />
+        <SignalGroup label="Hisse" rows={marketFocus?.equities_signals} />
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
         <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">CANLI FEED ODAKLARI</div>
         <div className="space-y-3">
           <DecisionCard
@@ -104,6 +111,17 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
             summary={domainFocus?.cyber?.summary}
             reasons={domainFocus?.cyber?.reasons}
           />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">FEED FRESHNESS</div>
+        <div className="space-y-3">
+          <FeedRow label="Kripto" row={liveInventory?.crypto} />
+          <FeedRow label="Hisse" row={liveInventory?.equities} />
+          <FeedRow label="Makro" row={liveInventory?.macro} />
+          <FeedRow label="World" row={liveInventory?.world} />
+          <FeedRow label="Cyber" row={liveInventory?.cyber} />
         </div>
       </div>
 
@@ -162,6 +180,54 @@ function DecisionCard({ label, summary, reasons }) {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function SignalGroup({ label, rows }) {
+  const items = Array.isArray(rows) ? rows.slice(0, 3) : [];
+  return (
+    <div className="mb-4 last:mb-0">
+      <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-[var(--accent-strong)]">{label}</div>
+      {items.length ? (
+        <div className="space-y-2">
+          {items.map((row) => (
+            <div key={`${label}-${row.asset}`} className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-medium text-[var(--text)]">{row.asset}</div>
+                <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+                  {row.stance} · {row.score}
+                </div>
+              </div>
+              <div className="mt-2 text-sm leading-6 text-[var(--text)]">{row.summary}</div>
+              {row.reasons?.length ? (
+                <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{row.reasons[0]}</div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3 text-sm text-[var(--muted)]">
+          Henuz asset bazli sinyal yok.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeedRow({ label, row }) {
+  const freshness = row?.freshness || 'unknown';
+  const count = row?.count_24h ?? 0;
+  const summary = row?.summary || 'Veri yok.';
+  return (
+    <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-medium text-[var(--text)]">{label}</div>
+        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+          {freshness} · {count}/24s
+        </div>
+      </div>
+      <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{summary}</div>
     </div>
   );
 }

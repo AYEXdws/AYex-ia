@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from types import SimpleNamespace
 
-from backend.src.services.market_decision import build_market_decision, enforce_decision_reply
+from backend.src.services.market_decision import build_asset_signal_board, build_market_decision, enforce_decision_reply
 from backend.src.services.proactive_briefing import build_proactive_briefing
 
 
@@ -101,6 +101,29 @@ def test_market_decision_understands_named_crypto_movers():
 
     assert out.active is True
     assert out.asset in {"SHIB", "XRP", "SOL", "ETH"}
+
+
+def test_build_asset_signal_board_returns_ranked_assets():
+    latest_events = [
+        SimpleNamespace(
+            title="Kripto Piyasasi: BTC $70.91K | +2.96% (24s)",
+            summary=(
+                "Top 5: BTC: $70.91K (+2.96%) | ETH: $2.16K (+4.09%) | XRP: $1.4600 (+4.55%) | "
+                "BNB: $643.3800 (+2.04%) | SOL: $91.2000 (+4.46%). En cok yukselen: XRP +4.55%."
+            ),
+            tags=["kripto", "btc", "piyasa"],
+            importance=7,
+            final_score=0.67,
+            timestamp=datetime.utcnow(),
+        )
+    ]
+
+    out = build_asset_signal_board(text="1 ay icin hangi coin daha mantikli", latest_events=latest_events, limit=3)
+
+    assert len(out) == 3
+    assert out[0]["asset"] in {"XRP", "SOL", "ETH"}
+    assert out[0]["stance"] in {"buy", "watch"}
+    assert out[0]["reasons"]
 
 
 def test_enforce_decision_reply_prepends_clear_headline():
