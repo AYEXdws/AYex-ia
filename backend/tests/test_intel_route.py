@@ -74,3 +74,5 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["market_focus"]["equities"]["asset"] in {"ASML", "TSLA"}
     assert payload["market_focus"]["macro"]["active"] is True
     assert "Makro Ozet" in payload["market_focus"]["macro"]["summary"]
+    assert payload["domain_focus"]["world"]["active"] is False
+    assert payload["domain_focus"]["cyber"]["active"] is False

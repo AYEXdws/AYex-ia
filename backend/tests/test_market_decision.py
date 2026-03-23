@@ -81,6 +81,28 @@ def test_market_decision_parses_stock_snapshot_in_equity_scope():
     assert out.stance in {"buy", "watch"}
 
 
+def test_market_decision_understands_named_crypto_movers():
+    latest_events = [
+        SimpleNamespace(
+            title="Kripto Piyasasi: BTC $70.91K | +2.96% (24s)",
+            summary=(
+                "Top 5: BTC: $70.91K (+2.96%) | ETH: $2.16K (+4.09%) | XRP: $1.4600 (+4.55%) | "
+                "BNB: $643.3800 (+2.04%) | SOL: $91.2000 (+4.46%). "
+                "En cok yukselen: SHIB +5.66%. En cok dusen: TRX -2.99%."
+            ),
+            tags=["kripto", "btc", "piyasa"],
+            importance=7,
+            final_score=0.67,
+            timestamp=datetime.utcnow(),
+        )
+    ]
+
+    out = build_market_decision(text="1 ay icin hangi coin daha mantikli", latest_events=latest_events)
+
+    assert out.active is True
+    assert out.asset in {"SHIB", "XRP", "SOL", "ETH"}
+
+
 def test_enforce_decision_reply_prepends_clear_headline():
     decision = {
         "active": True,

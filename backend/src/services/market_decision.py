@@ -14,6 +14,20 @@ ASSET_ALIASES: dict[str, tuple[str, ...]] = {
     "BNB": ("bnb", "binance"),
     "SUI": ("sui",),
     "DOGE": ("doge", "dogecoin"),
+    "ADA": ("ada", "cardano"),
+    "AVAX": ("avax", "avalanche"),
+    "LINK": ("link", "chainlink"),
+    "DOT": ("dot", "polkadot"),
+    "UNI": ("uni", "uniswap"),
+    "NEAR": ("near",),
+    "ICP": ("icp", "internet computer"),
+    "APT": ("apt", "aptos"),
+    "FIL": ("fil", "filecoin"),
+    "VET": ("vet", "vechain"),
+    "LTC": ("ltc", "litecoin"),
+    "XLM": ("xlm", "stellar"),
+    "TRX": ("trx", "tron"),
+    "SHIB": ("shib", "shiba", "shiba inu"),
     "AAPL": ("aapl", "apple"),
     "NVDA": ("nvda", "nvidia"),
     "TSLA": ("tsla", "tesla"),
@@ -26,8 +40,9 @@ ASSET_ALIASES: dict[str, tuple[str, ...]] = {
     "CRM": ("crm", "salesforce"),
     "AMD": ("amd",),
     "INTC": ("intc", "intel"),
+    "ORCL": ("orcl", "oracle"),
 }
-CRYPTO_ASSETS = {"BTC", "ETH", "SOL", "XRP", "BNB", "SUI", "DOGE"}
+CRYPTO_ASSETS = {"BTC", "ETH", "SOL", "XRP", "BNB", "SUI", "DOGE", "ADA", "AVAX", "LINK", "DOT", "UNI", "NEAR", "ICP", "APT", "FIL", "VET", "LTC", "XLM", "TRX", "SHIB"}
 EQUITY_ASSETS = set(ASSET_ALIASES) - CRYPTO_ASSETS
 
 POSITIVE_MARKERS = (
@@ -241,7 +256,9 @@ def _score_event(
         return
 
     event_assets = _assets_in_text(payload)
-    aggregate_signals = _extract_asset_change_signals(" ".join([title, summary]))
+    aggregate_text = " ".join([title, summary])
+    aggregate_signals = _extract_asset_change_signals(aggregate_text)
+    aggregate_signals.extend(_extract_relative_movers(aggregate_text))
     if not event_assets:
         event_assets = [signal["asset"] for signal in aggregate_signals]
         if not event_assets:
@@ -289,6 +306,22 @@ def _score_event(
             candidate_risks.setdefault(asset, [])
             candidate_risks[asset].append(f"{asset} tarafinda fiyat akisi negatif ({pct:+.2f}%).")
 
+    mover = _extract_named_mover(aggregate_text, positive=True)
+    if mover and _asset_in_scope(mover["asset"], scope):
+        asset = mover["asset"]
+        pct = float(mover["change_pct"])
+        candidate_scores[asset] = candidate_scores.get(asset, 0.0) + min(1.25, 0.42 + (abs(pct) / 4.0))
+        candidate_reasons.setdefault(asset, [])
+        candidate_reasons[asset].append(f"{asset} snapshot icinde en guclu momentum olarak isaretlenmis ({pct:+.2f}%).")
+
+    loser = _extract_named_mover(aggregate_text, positive=False)
+    if loser and _asset_in_scope(loser["asset"], scope):
+        asset = loser["asset"]
+        pct = float(loser["change_pct"])
+        candidate_scores[asset] = candidate_scores.get(asset, 0.0) - min(1.15, 0.38 + (abs(pct) / 4.0))
+        candidate_risks.setdefault(asset, [])
+        candidate_risks[asset].append(f"{asset} snapshot icinde en zayif momentum tarafinda ({pct:+.2f}%).")
+
 
 def _freshness_multiplier(ts_value: Any) -> float:
     if not isinstance(ts_value, str) or not ts_value.strip():
@@ -333,6 +366,35 @@ def _extract_asset_change_signals(text: str) -> list[dict[str, Any]]:
                 continue
             out.append({"asset": asset, "change_pct": pct})
             seen.add(asset)
+    return out
+
+
+def _extract_named_mover(text: str, *, positive: bool) -> dict[str, Any] | None:
+    marker = r"en\s+cok\s+yukselen" if positive else r"en\s+cok\s+dusen"
+    match = re.search(rf"{marker}\s*:\s*([A-Z]{{2,6}})\s*([+-]?\d+(?:\.\d+)?)%", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    asset = str(match.group(1) or "").strip().upper()
+    if asset not in ASSET_ALIASES:
+        return None
+    try:
+        pct = float(str(match.group(2) or "0").replace(",", "."))
+    except ValueError:
+        return None
+    return {"asset": asset, "change_pct": pct}
+
+
+def _extract_relative_movers(text: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for prefix, sign in ((r"yukselenler", 1.0), (r"dusenler", -1.0)):
+        match = re.search(rf"{prefix}\s*:\s*([^.;]+)", text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        assets_blob = str(match.group(1) or "")
+        for raw_asset in re.split(r"[,|/]", assets_blob):
+            asset = raw_asset.strip().upper()
+            if asset in ASSET_ALIASES:
+                out.append({"asset": asset, "change_pct": 1.4 * sign})
     return out
 
 

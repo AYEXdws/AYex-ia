@@ -15,6 +15,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
   const { model = '-', latency = '-', mode = '-', source = '-', ready = false } = status;
   const proactive = intelBrief?.proactive || null;
   const marketFocus = intelBrief?.market_focus || null;
+  const domainFocus = intelBrief?.domain_focus || null;
   return (
     <motion.aside
       className="glass-card h-full w-full p-5 md:p-6"
@@ -86,6 +87,22 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
             label="Makro"
             summary={marketFocus?.macro?.summary}
             reasons={marketFocus?.macro?.reasons}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">CANLI FEED ODAKLARI</div>
+        <div className="space-y-3">
+          <DecisionCard
+            label="World"
+            summary={domainFocus?.world?.summary}
+            reasons={domainFocus?.world?.reasons}
+          />
+          <DecisionCard
+            label="Cyber"
+            summary={domainFocus?.cyber?.summary}
+            reasons={domainFocus?.cyber?.reasons}
           />
         </div>
       </div>
