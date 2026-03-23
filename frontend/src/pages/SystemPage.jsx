@@ -94,6 +94,14 @@ export default function SystemPage() {
     loadSurface();
   }, [loadSurface]);
 
+  useEffect(() => {
+    if (!token) return undefined;
+    const timer = window.setInterval(() => {
+      loadSurface();
+    }, 90000);
+    return () => window.clearInterval(timer);
+  }, [loadSurface, token]);
+
   return (
     <motion.main
       className="relative h-full w-full"

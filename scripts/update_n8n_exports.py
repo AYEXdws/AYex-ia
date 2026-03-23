@@ -20,16 +20,46 @@ WRAPPER = """{{ JSON.stringify({
 }) }}"""
 
 MACRO_CODE = """const forexData = $('Get USD/TRY Rate').first().json || {};
+const goldData = $('Get Gold Price').first().json || {};
 
 function num(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
 
+function parseGoldUsd(payload) {
+  const direct = [
+    payload?.gold,
+    payload?.price,
+    payload?.close,
+    payload?.Close,
+    payload?.last,
+  ];
+  for (const value of direct) {
+    const parsed = num(value);
+    if (parsed > 0) return parsed;
+  }
+  const blob = [
+    typeof payload?.body === 'string' ? payload.body : '',
+    typeof payload?.data === 'string' ? payload.data : '',
+    typeof payload?.raw === 'string' ? payload.raw : '',
+  ].filter(Boolean).join('\\n');
+  if (!blob) return 0;
+  const lines = blob.split(/\\r?\\n/).map((line) => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const parts = lines[i].split(',');
+    if (parts.length < 5) continue;
+    const close = num(parts[4]);
+    if (close > 0) return close;
+  }
+  return 0;
+}
+
 const tryRate = num(forexData.rates?.TRY);
 const eurRate = num(forexData.rates?.EUR);
 const gbpRate = num(forexData.rates?.GBP);
 const jpyRate = num(forexData.rates?.JPY);
+const goldUsd = parseGoldUsd(goldData);
 
 if (tryRate === 0) return [];
 
@@ -38,18 +68,22 @@ const gbpTry = gbpRate ? tryRate / gbpRate : 0;
 const jpyTry = jpyRate ? tryRate / jpyRate : 0;
 const eurUsd = eurRate ? (1 / eurRate) : 0;
 const gbpUsd = gbpRate ? (1 / gbpRate) : 0;
+const goldTry = goldUsd ? goldUsd * tryRate : 0;
 
 const title = `Makro Ozet: USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}`;
 const summary =
   `USD/TRY ${tryRate.toFixed(2)} seviyesinde. ` +
   `EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}, GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}, JPY/TRY ${jpyTry ? jpyTry.toFixed(4) : 'N/A'}. ` +
   `EUR/USD ${eurUsd ? eurUsd.toFixed(4) : 'N/A'}, GBP/USD ${gbpUsd ? gbpUsd.toFixed(4) : 'N/A'}. ` +
+  `XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'}, ons altin TRY karsiligi ${goldTry ? goldTry.toFixed(0) : 'N/A'}. ` +
   `Kur tarafi Turkiye odakli fiyatlama, ithalat maliyeti ve enflasyon beklentileri icin izlenmeli.`;
 
 let importance = 6;
 if (tryRate > 35 || eurTry > 38) importance = 7;
 if (tryRate > 38 || eurTry > 41) importance = 8;
 if (tryRate > 41 || eurTry > 44) importance = 9;
+if (goldTry > 130000) importance = Math.max(importance, 7);
+if (goldTry > 145000) importance = Math.max(importance, 8);
 
 return [{
   json: {
@@ -61,12 +95,12 @@ return [{
     summary,
     category: 'economy',
     importance,
-    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'forex'],
-    why_it_matters: 'Kur sepeti enflasyon, maliyet baskisi ve risk algisi icin temel gostergedir.',
-    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}`,
+    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'xauusd'],
+    why_it_matters: 'Kur sepeti ve ons altin birlikte bakildiginda hem enflasyon baskisi hem de guvenli liman talebi daha net okunur.',
+    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'}`,
     possible_outcomes: [
-      'Kur sepeti yukselirse fiyatlama baskisi ve enflasyon beklentisi bozulabilir',
-      'Dolar ve euro tarafi sakinlesirse kisa vadeli risk algisi yumusayabilir'
+      'Kur sepeti ve altin birlikte yukselirse savunmaci fiyatlama ve riskten kacis guclenebilir',
+      'Kur sakinlesip altin gevserse kisa vadeli risk algisi yumusayabilir'
     ],
     confidence_hint: 0.9,
     source_quality: 'high',
@@ -247,6 +281,13 @@ def main() -> None:
             elif filename == "Macro Economy Feed v1.json" and node.get("name") == "Schedule Trigger":
                 node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
         remove_login_and_rewire(doc)
+        if filename == "Macro Economy Feed v1.json":
+            doc["connections"]["Schedule Trigger"] = {
+                "main": [[
+                    {"node": "Get USD/TRY Rate", "type": "main", "index": 0},
+                    {"node": "Get Gold Price", "type": "main", "index": 0},
+                ]]
+            }
         out_name = filename.replace(" v1.json", " v2.json")
         out_path = ROOT / out_name
         out_path.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")

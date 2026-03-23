@@ -14,6 +14,7 @@ function Dot({ active, color }) {
 export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
   const { model = '-', latency = '-', mode = '-', source = '-', ready = false } = status;
   const proactive = intelBrief?.proactive || null;
+  const marketFocus = intelBrief?.market_focus || null;
   return (
     <motion.aside
       className="glass-card h-full w-full p-5 md:p-6"
@@ -69,6 +70,27 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">NET KARARLAR</div>
+        <div className="space-y-3">
+          <DecisionCard
+            label="Kripto"
+            summary={marketFocus?.crypto?.summary}
+            reasons={marketFocus?.crypto?.reasons}
+          />
+          <DecisionCard
+            label="Hisse"
+            summary={marketFocus?.equities?.summary}
+            reasons={marketFocus?.equities?.reasons}
+          />
+          <DecisionCard
+            label="Makro"
+            summary={marketFocus?.macro?.summary}
+            reasons={marketFocus?.macro?.reasons}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
         <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">SON CEVABIN GEREKCESI</div>
         <p className="text-sm leading-6 text-[var(--muted)]">
           {insight?.decision || insight?.briefing || 'Yeni bir cevap geldiginde neden bu yone gittigini burada goreceksin.'}
@@ -102,6 +124,27 @@ function ReasonList({ title, items }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function DecisionCard({ label, summary, reasons }) {
+  const rows = Array.isArray(reasons) ? reasons.filter(Boolean).slice(0, 2) : [];
+  return (
+    <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3">
+      <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--accent-strong)]">{label}</div>
+      <div className="mt-2 text-sm leading-6 text-[var(--text)]">
+        {summary || 'Net karar sinyali henuz yok.'}
+      </div>
+      {rows.length ? (
+        <div className="mt-2 space-y-2">
+          {rows.map((item, index) => (
+            <div key={`${label}-${index}`} className="text-sm leading-6 text-[var(--muted)]">
+              {item}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
