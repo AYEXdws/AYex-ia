@@ -4,23 +4,65 @@ import MessageBubble from './MessageBubble';
 import TypingDots from './TypingDots';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
+const INITIAL_MESSAGE = {
+  role: 'assistant',
+  text: 'Buradayim. Konuyu net yaz. Gerekiyorsa karar da veririm, sadece yorum yapip gecmem.',
+  meta: 'baglam acik • hafiza hazir'
+};
 
-export default function ChatPanel({ token, onStatus }) {
-  const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      text: 'Buradayim. Konuyu net yaz. Gerekiyorsa karar da veririm, sadece yorum yapip gecmem.',
-      meta: 'baglam acik • hafiza hazir'
-    }
-  ]);
+export default function ChatPanel({ token, selectedSessionId, onSessionChange, onStatus, onRefreshSurface, onInsight }) {
+  const [messages, setMessages] = useState([INITIAL_MESSAGE]);
   const [text, setText] = useState('');
   const [typing, setTyping] = useState(false);
-  const sessionIdRef = useRef('');
+  const [loadingSession, setLoadingSession] = useState(false);
   const bottomRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, typing]);
+
+  useEffect(() => {
+    async function loadSession() {
+      if (!selectedSessionId) {
+        setMessages([INITIAL_MESSAGE]);
+        onInsight?.(null);
+        return;
+      }
+      setLoadingSession(true);
+      try {
+        const res = await fetch(`${API_BASE}/sessions/${selectedSessionId}/messages`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.detail || 'Session load failed');
+        }
+        const mapped = Array.isArray(data?.messages)
+          ? data.messages.map((message) => ({
+              role: message.role,
+              text: message.text,
+              meta: buildMeta(message.metrics, message.source, message.latency_ms),
+              trace: message.metrics?.explainability || null
+            }))
+          : [];
+        setMessages(mapped.length ? mapped : [INITIAL_MESSAGE]);
+        const latestAssistant = [...(data?.messages || [])].reverse().find((message) => message.role === 'assistant');
+        onInsight?.(latestAssistant?.metrics?.explainability || null);
+      } catch (err) {
+        setMessages([
+          {
+            role: 'assistant',
+            text: `Oturum yuklenemedi: ${err.message}`,
+            meta: 'session error'
+          }
+        ]);
+      } finally {
+        setLoadingSession(false);
+      }
+    }
+
+    loadSession();
+  }, [selectedSessionId, token, onInsight]);
 
   const canSend = useMemo(() => text.trim().length > 0 && !typing, [text, typing]);
 
@@ -43,7 +85,7 @@ export default function ChatPanel({ token, onStatus }) {
         },
         body: JSON.stringify({
           text: payloadText,
-          session_id: sessionIdRef.current || undefined
+          session_id: selectedSessionId || undefined
         })
       });
 
@@ -54,13 +96,14 @@ export default function ChatPanel({ token, onStatus }) {
         throw new Error(data?.detail || 'Request failed');
       }
       if (typeof data?.session_id === 'string' && data.session_id.trim()) {
-        sessionIdRef.current = data.session_id.trim();
+        onSessionChange?.(data.session_id.trim());
       }
 
       const metrics = data?.metrics || {};
       const model = metrics.used_model || '-';
       const source = metrics.source || '-';
       const mode = metrics.response_style || '-';
+      const explainability = metrics.explainability || null;
 
       onStatus({
         model,
@@ -69,13 +112,16 @@ export default function ChatPanel({ token, onStatus }) {
         source,
         ready: true
       });
+      onInsight?.(explainability);
+      onRefreshSurface?.();
 
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
           text: data.reply || 'No response',
-          meta: `${source} • ${metrics.latency_ms || latency} ms • ${mode}`
+          meta: `${source} • ${metrics.latency_ms || latency} ms • ${mode}`,
+          trace: explainability
         }
       ]);
     } catch (err) {
@@ -116,8 +162,13 @@ export default function ChatPanel({ token, onStatus }) {
       </div>
 
       <div className="scroll-thin flex-1 space-y-3 overflow-y-auto pr-1">
+        {loadingSession ? (
+          <div className="rounded-[22px] border border-[var(--line)] bg-black/10 px-4 py-3 text-sm text-[var(--muted)]">
+            Oturum yukleniyor...
+          </div>
+        ) : null}
         {messages.map((m, i) => (
-          <MessageBubble key={`${m.role}-${i}`} role={m.role} text={m.text} meta={m.meta} />
+          <MessageBubble key={`${m.role}-${i}`} role={m.role} text={m.text} meta={m.meta} trace={m.trace} />
         ))}
         <AnimatePresence>{typing ? <TypingDots key="typing" /> : null}</AnimatePresence>
         <div ref={bottomRef} />
@@ -147,4 +198,12 @@ export default function ChatPanel({ token, onStatus }) {
       </motion.form>
     </div>
   );
+}
+
+function buildMeta(metrics, source, latency) {
+  const safeMetrics = metrics || {};
+  const labelSource = safeMetrics.source || source || '-';
+  const labelLatency = safeMetrics.latency_ms || latency;
+  const labelMode = safeMetrics.response_style || safeMetrics.mode || '';
+  return [labelSource, labelLatency ? `${labelLatency} ms` : '', labelMode].filter(Boolean).join(' • ');
 }

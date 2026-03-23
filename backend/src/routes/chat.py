@@ -10,8 +10,10 @@ from fastapi import APIRouter, Depends, Request
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
+from backend.src.services.market_decision import build_market_decision
 from backend.src.services.model_router import ModelSelection, select_model
-from backend.src.services.query_context import build_query_context, collect_tool_evidence
+from backend.src.services.proactive_briefing import build_proactive_briefing
+from backend.src.services.query_context import build_explainability_trace, build_query_context, collect_tool_evidence
 from backend.src.utils.logging import get_logger, log_event
 
 router = APIRouter()
@@ -298,6 +300,17 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         intent_category=query_ctx.intent_category,
         text=text,
     )
+    latest_events = []
+    try:
+        latest_events = list(getattr(services.intel, "get_latest_events")(limit=8) or [])
+    except Exception:
+        latest_events = []
+    proactive_brief = build_proactive_briefing(services.intel, user_id=user_id, limit=6)
+    decision = build_market_decision(
+        text=text,
+        intel_context=query_ctx.intel_context,
+        latest_events=latest_events,
+    ).as_dict()
     event_count = int(query_ctx.intel_context.get("event_count") or len(query_ctx.intel_context.get("key_events") or []))
     if query_ctx.memory_hits > 0:
         logger.info("CHAT_MEMORY_USED hits=%s intent=%s", query_ctx.memory_hits, query_ctx.intent_category)
@@ -328,8 +341,10 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
     result = None
     reply = ""
     model_input = text
+    if decision.get("active"):
+        model_input = f"Kullanici istegi: {text}\n\nKarar notu:\n{decision.get('summary')}"
     if tool_evidence.text:
-        model_input = f"Kullanici istegi: {text}\n\nCanli arac kaniti:\n{tool_evidence.text}"
+        model_input = f"{model_input}\n\nCanli arac kaniti:\n{tool_evidence.text}"
 
     combined_profile_context = "\n\n".join(
         [
@@ -337,6 +352,8 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             for part in (
                 f"Yanit politikasi:\n{query_ctx.response_policy}",
                 query_ctx.profile_context,
+                f"Proaktif brief:\n{proactive_brief.get('summary')}" if proactive_brief.get("summary") else "",
+                f"Karar notu:\n{decision.get('summary')}" if decision.get("active") else "",
                 f"Sorguya ilgili intel:\n{query_ctx.intel_context_text}" if query_ctx.intel_context_text else "",
             )
             if str(part or "").strip()
@@ -417,6 +434,14 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
     source = str(getattr(result, "source", "") or "openai_direct")
     used_model = str(getattr(result, "used_model", "") or used_model_for_reply or model_selection.model)
     response_style = str(getattr(result, "response_style", "") or "normal")
+    explainability = build_explainability_trace(
+        query_ctx=query_ctx,
+        proactive_brief=proactive_brief,
+        decision=decision,
+        route=model_selection.route,
+        model=used_model,
+        tool=tool_evidence.selected_tool,
+    )
 
     services.chat_store.append_message(
         session.id,
@@ -436,6 +461,9 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             "intent": query_ctx.intent_category,
             "tool": tool_evidence.selected_tool,
             "memory_hits": query_ctx.memory_hits,
+            "decision": decision,
+            "proactive_brief": proactive_brief,
+            "explainability": explainability,
             "source": source,
             "mode": response_style,
             "response_style": response_style,
@@ -493,5 +521,8 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             "intent": query_ctx.intent_category,
             "tool": tool_evidence.selected_tool,
             "memory_hits": query_ctx.memory_hits,
+            "decision": decision,
+            "proactive_brief": proactive_brief,
+            "explainability": explainability,
         },
     )

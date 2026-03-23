@@ -20,6 +20,8 @@ class QueryContextBundle:
     intel_context: dict[str, Any]
     intel_context_text: str
     response_policy: str
+    memory_preview: tuple[str, ...]
+    intel_preview: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -142,6 +144,8 @@ def build_query_context(
     intel_context_text = "\n\n".join([part for part in intel_parts if part.strip()])
 
     merged_memory = "\n\n".join([x for x in [memory_context, long_memory_text] if x.strip()])
+    memory_preview = _memory_preview(memory_context, long_memory_text)
+    intel_preview = _intel_preview(intel_context)
     response_policy = build_response_policy(
         text,
         intent_category=intent_category,
@@ -162,6 +166,8 @@ def build_query_context(
         intel_context=intel_context,
         intel_context_text=intel_context_text,
         response_policy=response_policy,
+        memory_preview=memory_preview,
+        intel_preview=intel_preview,
     )
 
 
@@ -178,6 +184,33 @@ def collect_tool_evidence(services: Any, *, intent_category: str, text: str) -> 
     has_data = bool(getattr(tool_result, "has_data", False))
     selected_tool = str(getattr(tool_result, "selected_tool", "") or "")
     return ToolEvidence(selected_tool=selected_tool, text=evidence_text, has_data=has_data)
+
+
+def build_explainability_trace(
+    *,
+    query_ctx: QueryContextBundle,
+    proactive_brief: dict[str, Any] | None = None,
+    decision: dict[str, Any] | None = None,
+    route: str = "",
+    model: str = "",
+    tool: str = "",
+) -> dict[str, Any]:
+    proactive_brief = dict(proactive_brief or {})
+    decision = dict(decision or {})
+    return {
+        "route": route,
+        "model": model,
+        "intent": query_ctx.intent_category,
+        "tool": tool,
+        "memory": list(query_ctx.memory_preview),
+        "intel": list(query_ctx.intel_preview),
+        "briefing": str(proactive_brief.get("summary") or "").strip()[:320],
+        "decision": str(decision.get("summary") or "").strip()[:260],
+        "decision_asset": str(decision.get("asset") or "").strip(),
+        "decision_stance": str(decision.get("stance") or "").strip(),
+        "reasons": list(decision.get("reasons") or [])[:3],
+        "risks": list(decision.get("risks") or [])[:2],
+    }
 
 
 def build_response_policy(
@@ -260,3 +293,27 @@ def _normalize(text: str) -> str:
     for src, dst in repl.items():
         out = out.replace(src, dst)
     return " ".join(out.split())
+
+
+def _memory_preview(memory_context: str, long_memory_text: str) -> tuple[str, ...]:
+    rows: list[str] = []
+    for block in (memory_context, long_memory_text):
+        for line in str(block or "").splitlines():
+            clean = line.strip().lstrip("-").strip()
+            if not clean:
+                continue
+            rows.append(clean[:140])
+            if len(rows) >= 3:
+                return tuple(rows)
+    return tuple(rows)
+
+
+def _intel_preview(intel_context: dict[str, Any]) -> tuple[str, ...]:
+    rows: list[str] = []
+    for item in list(intel_context.get("key_events") or [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        if title:
+            rows.append(title[:140])
+    return tuple(rows)

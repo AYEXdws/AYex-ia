@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -70,21 +71,28 @@ class IntelStore:
         normalized = (title or "").strip().lower()
         if not normalized:
             return True
-        recent = self._events[-20:]
-        if incoming_event is not None and self._is_market_like(incoming_event):
-            now_utc = datetime.utcnow()
-            recent = []
-            for ev in self._events:
-                ev_ts = self._normalize_sort_timestamp(getattr(ev, "timestamp", None))
-                if ev_ts == datetime.min:
-                    continue
-                age_seconds = (now_utc - ev_ts).total_seconds()
-                if 0.0 <= age_seconds <= 3600.0:
-                    recent.append(ev)
+        recent = self._candidate_duplicates(incoming_event)
+        incoming_source = str(getattr(incoming_event, "source", "") or "").strip().lower()
+        incoming_ts = self._normalize_sort_timestamp(getattr(incoming_event, "timestamp", None)) if incoming_event is not None else datetime.min
+        incoming_market_sig = self._market_signature(title) if incoming_event is not None and self._is_market_like(incoming_event) else ""
         for ev in recent:
             existing = (ev.title or "").strip().lower()
             if not existing:
                 continue
+            existing_source = str(getattr(ev, "source", "") or "").strip().lower()
+            existing_ts = self._normalize_sort_timestamp(getattr(ev, "timestamp", None))
+            if incoming_source and incoming_source == existing_source and normalized == existing:
+                if incoming_ts == datetime.min or existing_ts == datetime.min:
+                    return True
+                if abs((incoming_ts - existing_ts).total_seconds()) <= 86400.0:
+                    return True
+            if incoming_market_sig and incoming_source and incoming_source == existing_source:
+                existing_sig = self._market_signature(ev.title)
+                if existing_sig and existing_sig == incoming_market_sig:
+                    if incoming_ts == datetime.min or existing_ts == datetime.min:
+                        return True
+                    if abs((incoming_ts - existing_ts).total_seconds()) <= 1800.0:
+                        return True
             ratio = SequenceMatcher(None, normalized, existing).ratio() * 100.0
             if ratio > 90.0:
                 return True
@@ -94,7 +102,35 @@ class IntelStore:
         category = str(getattr(event, "category", "") or "").strip().lower()
         source_type = str(getattr(event, "source_type", "") or "").strip().lower()
         source = str(getattr(event, "source", "") or "").strip().lower()
-        return category == "economy" or source_type == "market_api" or source == "market_api"
+        return category == "economy" or source_type == "market_api" or source in {"market_api", "coingecko", "yahoo_finance", "er_api"}
+
+    def _candidate_duplicates(self, incoming_event: IntelEvent | None = None) -> list[IntelEvent]:
+        if incoming_event is None:
+            return list(self._events[-20:])
+        if self._is_market_like(incoming_event):
+            horizon_seconds = 3600.0
+        else:
+            horizon_seconds = 7 * 86400.0
+        now_utc = datetime.utcnow()
+        recent: list[IntelEvent] = []
+        for ev in self._events:
+            ev_ts = self._normalize_sort_timestamp(getattr(ev, "timestamp", None))
+            if ev_ts == datetime.min:
+                continue
+            age_seconds = (now_utc - ev_ts).total_seconds()
+            if 0.0 <= age_seconds <= horizon_seconds:
+                recent.append(ev)
+        return recent[-200:]
+
+    def _market_signature(self, title: str) -> str:
+        text = str(title or "").strip().lower()
+        if not text:
+            return ""
+        text = re.sub(r"\$?\d+(?:[.,]\d+)?k?", " ", text)
+        text = re.sub(r"[+-]?\d+(?:[.,]\d+)?%", " ", text)
+        text = re.sub(r"\(\s*\d+\s*[smhd]?\s*\)", " ", text)
+        text = re.sub(r"[^a-z\s]", " ", text)
+        return " ".join(text.split())
 
     def _load_from_disk(self) -> None:
         if self._persist_path is None:

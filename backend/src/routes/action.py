@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends, Request
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ActionRequest, ActionResponse
 from backend.src.services.container import BackendServices
-from backend.src.services.query_context import build_query_context, collect_tool_evidence
+from backend.src.services.market_decision import build_market_decision
+from backend.src.services.proactive_briefing import build_proactive_briefing
+from backend.src.services.query_context import build_explainability_trace, build_query_context, collect_tool_evidence
 from backend.src.utils.logging import get_logger
 
 router = APIRouter()
@@ -101,6 +103,17 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
         use_profile=payload.use_profile,
         max_intel_events=max(4, int(getattr(services.settings, "intel_prompt_max_events", 6) or 6)),
     )
+    latest_events = []
+    try:
+        latest_events = list(getattr(services.intel, "get_latest_events")(limit=8) or [])
+    except Exception:
+        latest_events = []
+    proactive_brief = build_proactive_briefing(services.intel, user_id=user_id, limit=6)
+    decision = build_market_decision(
+        text=text,
+        intel_context=query_ctx.intel_context,
+        latest_events=latest_events,
+    ).as_dict()
     if query_ctx.memory_hits > 0:
         logger.info("MEMORY_USED route=action hits=%s", query_ctx.memory_hits)
 
@@ -120,14 +133,18 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             for part in (
                 f"Yanit politikasi:\n{query_ctx.response_policy}",
                 query_ctx.profile_context,
+                f"Proaktif brief:\n{proactive_brief.get('summary')}" if proactive_brief.get("summary") else "",
+                f"Karar notu:\n{decision.get('summary')}" if decision.get("active") else "",
                 f"Sorguya ilgili intel:\n{query_ctx.intel_context_text}" if query_ctx.intel_context_text else "",
             )
             if str(part or "").strip()
         ]
     )
     model_input = text
+    if decision.get("active"):
+        model_input = f"Kullanici istegi: {text}\n\nKarar notu:\n{decision.get('summary')}"
     if tool_context:
-        model_input = f"Kullanici istegi: {text}\n\nTool kaniti:\n{tool_context}"
+        model_input = f"{model_input}\n\nTool kaniti:\n{tool_context}"
 
     if query_ctx.intent_category == "agent_task":
         agent_res = services.agent_mode.run(
@@ -152,6 +169,14 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
         )
 
     reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
+    explainability = build_explainability_trace(
+        query_ctx=query_ctx,
+        proactive_brief=proactive_brief,
+        decision=decision,
+        route="agent_task" if query_ctx.intent_category == "agent_task" else "action",
+        model=str(getattr(result, "used_model", "") or payload.model or ""),
+        tool=tool_result.selected_tool,
+    )
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
     services.chat_store.append_message(
@@ -171,6 +196,9 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             "response_style": query_ctx.response_style,
             "intent": query_ctx.intent_category,
             "tool": tool_result.selected_tool,
+            "decision": decision,
+            "proactive_brief": proactive_brief,
+            "explainability": explainability,
         },
     )
     services.long_memory.sync_profile(query_ctx.profile_data, user_id=user_id)
@@ -200,6 +228,9 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             "response_style": query_ctx.response_style,
             "intent": query_ctx.intent_category,
             "tool": tool_result.selected_tool,
+            "decision": decision,
+            "proactive_brief": proactive_brief,
+            "explainability": explainability,
         },
         raw=_compact_raw(result.raw),
     )

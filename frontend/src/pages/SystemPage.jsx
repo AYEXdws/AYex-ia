@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import BackgroundFX from '../components/BackgroundFX';
 import ChatPanel from '../components/ChatPanel';
+import SessionRail from '../components/SessionRail';
 import StatusPanel from '../components/StatusPanel';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -16,6 +17,10 @@ export default function SystemPage() {
     ready: false
   });
   const [auth, setAuth] = useState({ username: '', password: '', error: '', loading: false });
+  const [sessions, setSessions] = useState([]);
+  const [selectedSessionId, setSelectedSessionId] = useState('');
+  const [intelBrief, setIntelBrief] = useState(null);
+  const [insight, setInsight] = useState(null);
 
   async function login(e) {
     e.preventDefault();
@@ -44,7 +49,50 @@ export default function SystemPage() {
     localStorage.removeItem('ayex_token');
     setToken('');
     setStatus({ model: '-', latency: '-', mode: '-', source: '-', ready: false });
+    setSessions([]);
+    setSelectedSessionId('');
+    setIntelBrief(null);
+    setInsight(null);
   }
+
+  const fetchAuthed = useCallback(
+    async (path) => {
+      const res = await fetch(`${API_BASE}${path}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.detail || 'Request failed');
+      }
+      return data;
+    },
+    [token]
+  );
+
+  const loadSurface = useCallback(async () => {
+    if (!token) return;
+    try {
+      const [sessionData, intelData] = await Promise.all([
+        fetchAuthed('/sessions?limit=24'),
+        fetchAuthed('/intel')
+      ]);
+      const nextSessions = Array.isArray(sessionData?.sessions) ? sessionData.sessions : [];
+      setSessions(nextSessions);
+      setIntelBrief(intelData || null);
+      setSelectedSessionId((current) => {
+        if (current && nextSessions.some((item) => item.id === current)) {
+          return current;
+        }
+        return nextSessions[0]?.id || '';
+      });
+    } catch (err) {
+      setStatus((prev) => ({ ...prev, ready: true, source: 'surface_error' }));
+    }
+  }, [fetchAuthed, token]);
+
+  useEffect(() => {
+    loadSurface();
+  }, [loadSurface]);
 
   return (
     <motion.main
@@ -104,9 +152,22 @@ export default function SystemPage() {
             </form>
           </section>
         ) : (
-          <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
-            <ChatPanel token={token} onStatus={setStatus} />
-            <StatusPanel status={status} onLogout={logout} />
+          <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[280px_minmax(0,1fr)_340px]">
+            <SessionRail
+              sessions={sessions}
+              selectedSessionId={selectedSessionId}
+              onSelectSession={setSelectedSessionId}
+              onNewSession={() => setSelectedSessionId('')}
+            />
+            <ChatPanel
+              token={token}
+              selectedSessionId={selectedSessionId}
+              onSessionChange={setSelectedSessionId}
+              onStatus={setStatus}
+              onRefreshSurface={loadSurface}
+              onInsight={setInsight}
+            />
+            <StatusPanel status={status} intelBrief={intelBrief} insight={insight} onLogout={logout} />
           </section>
         )}
       </div>

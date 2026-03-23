@@ -11,8 +11,9 @@ function Dot({ active, color }) {
   );
 }
 
-export default function StatusPanel({ status, onLogout }) {
+export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
   const { model = '-', latency = '-', mode = '-', source = '-', ready = false } = status;
+  const proactive = intelBrief?.proactive || null;
   return (
     <motion.aside
       className="glass-card h-full w-full p-5 md:p-6"
@@ -52,12 +53,30 @@ export default function StatusPanel({ status, onLogout }) {
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
-        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">CHECKPOINT</div>
-        <ul className="space-y-2 text-sm text-[var(--text)]">
-          <li className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-2">Baglam once, laf sonra</li>
-          <li className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-2">Tek cevapta hafiza + veri</li>
-          <li className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-2">Dogrudan dil, yapay ton yok</li>
-        </ul>
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">PROAKTIF BRIEF</div>
+        <p className="text-sm leading-6 text-[var(--text)]">
+          {proactive?.summary || 'Guncel brief henuz yuklenmedi.'}
+        </p>
+        {proactive?.priorities?.length ? (
+          <div className="mt-3 space-y-2">
+            {proactive.priorities.slice(0, 3).map((item) => (
+              <div key={item} className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-2 text-sm text-[var(--muted)]">
+                {item}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">SON CEVABIN GEREKCESI</div>
+        <p className="text-sm leading-6 text-[var(--muted)]">
+          {insight?.decision || insight?.briefing || 'Yeni bir cevap geldiginde neden bu yone gittigini burada goreceksin.'}
+        </p>
+        {insight?.memory?.length ? <ReasonList title="Hafiza izleri" items={insight.memory} /> : null}
+        {insight?.intel?.length ? <ReasonList title="Intel izleri" items={insight.intel} /> : null}
+        {insight?.reasons?.length ? <ReasonList title="Karar gerekcesi" items={insight.reasons} /> : null}
+        {insight?.risks?.length ? <ReasonList title="Riskler" items={insight.risks} /> : null}
       </div>
     </motion.aside>
   );
@@ -68,6 +87,21 @@ function StatusItem({ label, value }) {
     <div className="rounded-[22px] border border-[var(--line)] bg-white/[0.03] px-3 py-3">
       <div className="text-[11px] uppercase tracking-[0.13em] text-[var(--muted)]">{label}</div>
       <div className="mt-1 break-words text-[15px] font-medium text-[var(--text)]">{value}</div>
+    </div>
+  );
+}
+
+function ReasonList({ title, items }) {
+  return (
+    <div className="mt-4">
+      <div className="mb-2 text-[11px] uppercase tracking-[0.15em] text-[var(--accent-strong)]">{title}</div>
+      <div className="space-y-2">
+        {items.slice(0, 3).map((item, index) => (
+          <div key={`${title}-${index}`} className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-2 text-sm leading-6 text-[var(--text)]">
+            {item}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
