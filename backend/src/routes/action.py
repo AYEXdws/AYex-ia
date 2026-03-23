@@ -31,7 +31,7 @@ def _compact_raw(raw: dict) -> dict:
 @router.post("/action", response_model=ActionResponse)
 def action(payload: ActionRequest, request: Request, services: BackendServices = Depends(get_services)) -> ActionResponse:
     user_id = str(getattr(request.state, "user_id", "default"))
-    ai_source = "openclaw" if services.settings.openclaw_enabled else "openai_direct"
+    ai_source = "model_direct"
     text = (payload.text or "").strip()
     if not text:
         return ActionResponse(
@@ -58,7 +58,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
     dedup = services.chat_store.recent_assistant_for_duplicate(
         session.id,
         user_text=text,
-        max_age_sec=services.settings.openclaw_cache_ttl_sec,
+        max_age_sec=services.settings.model_cache_ttl_sec,
     )
     if dedup is not None:
         reply = str(dedup.get("text") or "").strip() or "Model yaniti alinamadi. Lutfen tekrar dene."
@@ -91,7 +91,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             raw={},
         )
 
-    history = services.chat_store.model_context(session.id, turns=services.settings.openclaw_context_turns)
+    history = services.chat_store.model_context(session.id, turns=services.settings.model_context_turns)
     profile_context = services.profile.prompt_context() if payload.use_profile else None
     profile_data = services.profile.load() if payload.use_profile else {}
     style_decision = services.style.detect(text, profile_style=str(profile_data.get("response_style") or ""))
@@ -135,7 +135,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
         )
         result = agent_res.final
     else:
-        result = services.openclaw.run_action(
+        result = services.model.run_action(
             model_input,
             workspace=payload.workspace,
             model=payload.model,

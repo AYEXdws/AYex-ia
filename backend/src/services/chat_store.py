@@ -110,7 +110,7 @@ class ChatStore:
         session_id: str,
         role: str,
         text: str,
-        source: str = "openclaw",
+        source: str = "model_direct",
         latency_ms: int | None = None,
         metrics: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:

@@ -42,9 +42,9 @@ class ToolRouter:
             return ToolRouteResult(intent=intent)
 
         if intent == "market":
-            run = self.registry.run("market_tool", query=text, params={})
-            logger.info("TOOL_SELECTED=%s intent=%s", "market_tool", intent)
-            return ToolRouteResult(intent=intent, selected_tool="market_tool", executions=[run])
+            # Market data should come from intel feeds; skip live market tool to avoid redundant external calls.
+            logger.info("TOOL_SKIPPED=%s intent=%s reason=%s", "market_tool", intent, "intel_feed_preferred")
+            return ToolRouteResult(intent=intent)
 
         if intent == "url_read":
             url = self._extract_url(text)
@@ -85,8 +85,6 @@ class ToolRouter:
         out: list[str] = []
         if "http://" in normalized or "https://" in normalized:
             out.append("fetch_url_tool")
-        if any(k in normalized for k in ("piyasa", "btc", "bitcoin", "eth", "altin", "dolar")):
-            out.append("market_tool")
         if any(k in normalized for k in ("arastir", "karsilastir", "analiz", "nedir", "kimdir", "haber")):
             out.append("search_tool")
         if not out:

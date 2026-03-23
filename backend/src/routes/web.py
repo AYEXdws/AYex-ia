@@ -675,7 +675,7 @@ def web_chat() -> str:
     const metricsEl = document.getElementById('metrics');
     const runtimeModelEl = document.getElementById('runtimeModel');
     const charCountEl = document.getElementById('charCount');
-    const expectedModel = '__OPENCLAW_MODEL__';
+    const expectedModel = '__EXPECTED_MODEL__';
     const spotlightEl = document.getElementById('spotlight');
 
     function nowClock() {
@@ -976,9 +976,5 @@ def web_chat() -> str:
   </script>
 </body>
 </html>"""
-    openclaw_enabled_raw = (os.environ.get("OPENCLAW_ENABLED") or "true").strip().lower()
-    if openclaw_enabled_raw in {"1", "true", "yes", "on"}:
-      expected_model = (os.environ.get("OPENCLAW_MODEL") or "openai/gpt-4o-mini").strip()
-    else:
-      expected_model = (os.environ.get("AYEX_CHAT_MODEL") or "gpt-4.1-mini").strip()
-    return html.replace("__OPENCLAW_MODEL__", expected_model).replace("__OPENCLAW_MODEL__", expected_model)
+    expected_model = (os.environ.get("AYEX_CHAT_MODEL") or os.environ.get("AYEX_MODEL") or "claude-haiku-4.5").strip()
+    return html.replace("__EXPECTED_MODEL__", expected_model).replace("__EXPECTED_MODEL__", expected_model)

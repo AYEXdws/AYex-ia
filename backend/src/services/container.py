@@ -17,7 +17,7 @@ from backend.src.services.cost_guard import CostGuardService
 from backend.src.services.intent_router import IntentRouter
 from backend.src.services.long_memory import LongMemoryService
 from backend.src.services.memory_summarizer import MemorySummarizer
-from backend.src.services.openclaw_service import OpenClawService
+from backend.src.services.model_service import ModelService
 from backend.src.services.profile_service import ProfileService
 from backend.src.services.response_style import ResponseStyleService
 from backend.src.services.response_orchestrator import ResponseOrchestrator
@@ -42,7 +42,7 @@ class BackendServices:
     tools: ToolRouter
     voice: VoiceResponseService
     orchestrator: ResponseOrchestrator
-    openclaw: OpenClawService
+    model: ModelService
     chat_store: ChatStore
     profile: ProfileService
     auth: AuthService
@@ -57,10 +57,7 @@ def build_services() -> BackendServices:
     settings = load_settings()
     openai_primary = (os.environ.get("OPENAI_API_KEY") or "").strip()
     openai_legacy = (os.environ.get("AYEX_API_KEY") or "").strip()
-    if settings.openclaw_enabled:
-        logger.info("CONFIG_MODE openclaw_enabled=true")
-    else:
-        logger.info("CONFIG_MODE openclaw_enabled=false (direct OpenAI primary path)")
+    logger.info("CONFIG_MODE direct_provider_path=true")
     if openai_primary:
         logger.info("OPENAI_KEY_SOURCE OPENAI_API_KEY")
     elif openai_legacy:
@@ -82,18 +79,17 @@ def build_services() -> BackendServices:
             logger.info("ANTHROPIC_CLIENT initialized")
         except Exception as e:
             logger.warning("ANTHROPIC_CLIENT_FAILED error=%s", str(e))
-    openclaw = OpenClawService(settings, agents=agents, anthropic_client=anthropic_client)
+    model_service = ModelService(settings, anthropic_client=anthropic_client)
     chat_store = ChatStore(settings)
     profile = ProfileService(settings)
     auth = AuthService()
     style = ResponseStyleService()
     long_memory = LongMemoryService(settings)
     long_memory.sync_profile(profile.load())
-    agent_mode = AgentModeService(openclaw=openclaw, tools=tools)
+    agent_mode = AgentModeService(model_service=model_service, tools=tools)
     intel_archive = IntelArchive(data_dir=Path(settings.data_dir))
     intel_store = IntelStore(persist_path=Path(settings.data_dir) / "intel_events.json", archive=intel_archive)
-    intel = IntelService(intel_store, openai_client=openclaw.openai, profile_loader=profile.load)
-    _seed_intel(intel)
+    intel = IntelService(intel_store, openai_client=model_service.openai, profile_loader=profile.load)
     cost_guard = CostGuardService(settings)
     orchestrator = ResponseOrchestrator(
         stt_service=stt,
@@ -101,7 +97,7 @@ def build_services() -> BackendServices:
         intent_router=intents,
         tool_router=tools,
         voice_response_service=voice,
-        openclaw_service=openclaw,
+        model_service=model_service,
     )
     return BackendServices(
         settings=settings,
@@ -113,7 +109,7 @@ def build_services() -> BackendServices:
         tools=tools,
         voice=voice,
         orchestrator=orchestrator,
-        openclaw=openclaw,
+        model=model_service,
         chat_store=chat_store,
         profile=profile,
         auth=auth,
@@ -122,49 +118,4 @@ def build_services() -> BackendServices:
         agent_mode=agent_mode,
         intel=intel,
         cost_guard=cost_guard,
-    )
-
-
-def _seed_intel(intel: IntelService) -> None:
-    if intel.store.get_all_events():
-        return
-    intel.create_event(
-        title="Bitcoin rises 5%",
-        summary="BTC fiyatı son 24 saatte yaklasik %5 artarak risk istahini yukseltti.",
-        category="market",
-        importance=9,
-        source="seed",
-        tags=["btc", "crypto", "market"],
-    )
-    intel.create_event(
-        title="Major data breach reported",
-        summary="Buyuk bir teknoloji sirketinde milyonlarca kaydi etkileyen veri sizintisi bildirildi.",
-        category="cybersecurity",
-        importance=10,
-        source="seed",
-        tags=["security", "breach"],
-    )
-    intel.create_event(
-        title="AI regulation discussion",
-        summary="Politika yapicilar yeni yapay zeka duzenleme cercevelerini tartisiyor.",
-        category="policy",
-        importance=7,
-        source="seed",
-        tags=["ai", "regulation"],
-    )
-    intel.create_event(
-        title="Cloud outage impacts services",
-        summary="Bolgesel bulut kesintisi bazi SaaS urunlerinde erisim sorunlarina neden oldu.",
-        category="infrastructure",
-        importance=8,
-        source="seed",
-        tags=["cloud", "outage"],
-    )
-    intel.create_event(
-        title="Semiconductor supply improves",
-        summary="Cip tedarik zincirindeki normalizasyon, donanim teslim surelerini kisaltiyor.",
-        category="industry",
-        importance=6,
-        source="seed",
-        tags=["chip", "supply-chain"],
     )

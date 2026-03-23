@@ -56,11 +56,10 @@ class OpenAIDirectClient:
         normalized_model = normalize_model_for_openai(original_model)
 
         logger.info(
-            "OPENAI_CALL_START route=%s original_model=%s normalized_model=%s openclaw_enabled=%s",
+            "OPENAI_CALL_START route=%s original_model=%s normalized_model=%s",
             route_name,
             original_model,
             normalized_model,
-            self.settings.openclaw_enabled,
         )
 
         try:
@@ -72,9 +71,8 @@ class OpenAIDirectClient:
                 "max_output_tokens": max_output_tokens,
                 "store": False,
             }
-            if temperature is not None:
+            if temperature is not None and "gpt-5" not in normalized_model.lower():
                 call_params["temperature"] = temperature
-
             response = client.responses.create(
                 **call_params,
             )

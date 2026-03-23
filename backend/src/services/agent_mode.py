@@ -2,20 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from backend.src.services.openclaw_service import OpenClawResult, OpenClawService
+from backend.src.services.model_service import ModelResult, ModelService
 from backend.src.services.tool_router import ToolRouteResult, ToolRouter
 
 
 @dataclass(frozen=True)
 class AgentModeResult:
-    final: OpenClawResult
-    plan: OpenClawResult
+    final: ModelResult
+    plan: ModelResult
     tools: ToolRouteResult
 
 
 class AgentModeService:
-    def __init__(self, openclaw: OpenClawService, tools: ToolRouter):
-        self.openclaw = openclaw
+    def __init__(self, model_service: ModelService, tools: ToolRouter):
+        self.model_service = model_service
         self.tools = tools
 
     def run(
@@ -33,7 +33,7 @@ class AgentModeService:
             "Asagidaki hedef icin en fazla 3 adimlik net plan cikar.\n"
             f"Hedef: {text}"
         )
-        plan_res = self.openclaw.run_action(
+        plan_res = self.model_service.run_action(
             plan_prompt,
             workspace=workspace,
             model=model,
@@ -54,7 +54,7 @@ class AgentModeService:
             f"Kanit:\n{evidence or 'Tool verisi yok.'}\n\n"
             "Yanitini uygulanabilir bir rapor formatinda ver."
         )
-        final = self.openclaw.run_action(
+        final = self.model_service.run_action(
             final_prompt,
             workspace=workspace,
             model=model,

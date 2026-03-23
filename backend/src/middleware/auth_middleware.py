@@ -18,10 +18,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/chat",
             "/action",
             "/events",
+            "/event",
             "/sessions",
             "/profile",
             "/usage",
             "/intel",
+            "/audio",
+            "/voice",
+            "/tts",
         )
 
     async def dispatch(self, request: Request, call_next):

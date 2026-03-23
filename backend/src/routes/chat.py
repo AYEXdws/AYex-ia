@@ -105,7 +105,7 @@ def _schedule_memory_summary(services: BackendServices, messages: list[dict[str,
             stored = services.memory.summarize_and_store(
                 messages=messages,
                 session_id=session_id,
-                openai_client=services.openclaw.openai,
+                openai_client=services.model.openai,
             )
             if stored:
                 logger.info("MEMORY_SUMMARY_STORED session_id=%s memory_id=%s", session_id, str(stored.get("id") or ""))
@@ -594,7 +594,7 @@ def build_safe_fallback_response(intel_data: dict[str, Any], query: str = "") ->
 
 def _chat_legacy(payload: ChatRequest, request: Request, services: BackendServices = Depends(get_services)) -> ChatResponse:
     user_id = str(getattr(request.state, "user_id", "default"))
-    ai_source = "openclaw" if services.settings.openclaw_enabled else "openai_direct"
+    ai_source = "model_direct"
     text = (payload.text or "").strip()
     if not text:
         return ChatResponse(
@@ -621,7 +621,7 @@ def _chat_legacy(payload: ChatRequest, request: Request, services: BackendServic
     dedup = services.chat_store.recent_assistant_for_duplicate(
         session.id,
         user_text=text,
-        max_age_sec=services.settings.openclaw_cache_ttl_sec,
+        max_age_sec=services.settings.model_cache_ttl_sec,
     )
     if dedup is not None:
         reply = str(dedup.get("text") or "").strip() or "Model yaniti alinamadi. Lutfen tekrar dene."
@@ -653,7 +653,7 @@ def _chat_legacy(payload: ChatRequest, request: Request, services: BackendServic
         )
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
-    history = services.chat_store.model_context(session.id, turns=services.settings.openclaw_context_turns)
+    history = services.chat_store.model_context(session.id, turns=services.settings.model_context_turns)
     profile_data = services.profile.load()
     summary_memory_context = ""
     try:
@@ -901,7 +901,7 @@ Türkiye saati: UTC+3
         )
         result = agent_res.final
     else:
-        result = services.openclaw.run_action(
+        result = services.model.run_action(
             model_input,
             workspace=payload.workspace,
             model=model_selection.model,
@@ -920,7 +920,7 @@ Türkiye saati: UTC+3
         logger.info("CHAT_VALIDATION stage=initial short_or_empty=%s", needs_retry)
         if needs_retry:
             logger.info("CHAT_REGEN triggered=true reason=short_or_empty")
-            retry_result = services.openclaw.run_action(
+            retry_result = services.model.run_action(
                 model_input,
                 workspace=payload.workspace,
                 model=model_selection.model,
@@ -1182,7 +1182,7 @@ async def _async_memory_summary(services: BackendServices, session_id: str) -> N
             services.memory.summarize_and_store(
                 messages=messages,
                 session_id=session_id,
-                openai_client=services.openclaw.openai,
+                openai_client=services.model.openai,
             )
     except Exception as exc:
         logger.warning("MEMORY_SUMMARY_FAILED error=%s", str(exc))
@@ -1196,7 +1196,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         return ChatResponse(reply="Bos mesaj gonderilemez.", session_id=payload.session_id or "", metrics={"ok": False})
 
     user_id = "ayex"
-    ai_source = "openclaw" if services.settings.openclaw_enabled else "openai_direct"
+    ai_source = "model_direct"
 
     guard = services.cost_guard.check_and_track(text)
     if not guard.ok:
@@ -1210,7 +1210,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
     dedup = services.chat_store.recent_assistant_for_duplicate(
         session.id,
         user_text=text,
-        max_age_sec=services.settings.openclaw_cache_ttl_sec,
+        max_age_sec=services.settings.model_cache_ttl_sec,
     )
     if dedup is not None:
         reply = str(dedup.get("text") or "").strip() or "Model yaniti alinamadi. Lutfen tekrar dene."
@@ -1238,7 +1238,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         )
 
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
-    history = services.chat_store.model_context(session.id, turns=services.settings.openclaw_context_turns)
+    history = services.chat_store.model_context(session.id, turns=services.settings.model_context_turns)
 
     all_events: list[Any] = []
     try:
@@ -1284,7 +1284,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
     result = None
     reply = ""
     try:
-        result = services.openclaw.run_action(
+        result = services.model.run_action(
             text,
             workspace=payload.workspace,
             model=model_selection.model,
@@ -1303,7 +1303,9 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         reply = "Bir sorun olustu, tekrar dene."
 
     latency_ms = int(getattr(result, "latency_ms", 0) or 0)
-    source = "anthropic_direct" if model_selection.provider == "anthropic" else "openai_direct"
+    source = str(getattr(result, "source", "") or "openai_direct")
+    used_model = str(getattr(result, "used_model", "") or model_selection.model)
+    response_style = str(getattr(result, "response_style", "") or "normal")
     services.chat_store.append_message(
         session.id,
         role="assistant",
@@ -1312,10 +1314,13 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         latency_ms=latency_ms,
         metrics={
             "ok": bool(getattr(result, "ok", True)),
-            "model": model_selection.model,
+            "model": used_model,
+            "used_model": used_model,
             "route": model_selection.route,
             "event_count": event_count,
             "source": source,
+            "mode": response_style,
+            "response_style": response_style,
         },
     )
 
@@ -1339,10 +1344,12 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         reply=reply,
         session_id=session.id,
         metrics={
-            "model": model_selection.model,
+            "model": used_model,
+            "used_model": used_model,
             "latency_ms": latency_ms,
             "source": source,
-            "mode": "normal",
+            "mode": response_style,
+            "response_style": response_style,
             "event_count": event_count,
         },
     )

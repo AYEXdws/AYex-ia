@@ -7,27 +7,27 @@ services:
     envVars:
       - key: AYEX_WEB_MVP_ONLY
         value: "true"
-      - key: OPENCLAW_ENABLED
-        value: "true"
-      - key: OPENCLAW_BASE_URL
-        sync: false
-      - key: OPENCLAW_API_KEY
-        sync: false
       - key: OPENAI_API_KEY
         sync: false
-      - key: OPENCLAW_MODE
-        value: openai_chat_completions
-      - key: OPENCLAW_MODEL
-        value: openai/gpt-4o-mini
-      - key: OPENCLAW_MAX_OUTPUT_TOKENS
-        value: "80"
-      - key: OPENCLAW_TIMEOUT_SEC
-        value: "12"
-      - key: OPENCLAW_CONTEXT_TURNS
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AYEX_CHAT_MODEL
+        value: claude-haiku-4.5
+      - key: AYEX_REASONING_MODEL
+        value: claude-sonnet-4.6
+      - key: AYEX_POWER_MODEL
+        value: gpt-5
+      - key: AYEX_FAST_MODEL
+        value: gpt-4o-mini
+      - key: AYEX_MODEL_MAX_OUTPUT_TOKENS
+        value: "320"
+      - key: AYEX_MODEL_CONTEXT_TURNS
         value: "6"
-      - key: OPENCLAW_CACHE_TTL_SEC
+      - key: AYEX_MODEL_CACHE_TTL_SEC
         value: "45"
-      - key: OPENCLAW_CACHE_SIZE
+      - key: AYEX_MODEL_CACHE_SIZE
         value: "128"
-      - key: OPENCLAW_INSTRUCTIONS
-        value: "Her zaman Turkce cevap ver. Kisa, net ve dogal yaz. Basit sorularda 2-4 cumle kullan; analiz gereken durumda maddeli ve yapisal yanit ver."
+      - key: AYEX_DAILY_REQUEST_LIMIT
+        value: "350"
+      - key: AYEX_DAILY_INPUT_CHAR_LIMIT
+        value: "120000"

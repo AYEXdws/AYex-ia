@@ -6,7 +6,7 @@ from ayex_core.agent import AyexAgent
 
 from backend.src.services.intent_router import IntentResult, IntentRouter
 from backend.src.services.model_router import select_model
-from backend.src.services.openclaw_service import OpenClawService
+from backend.src.services.model_service import ModelService
 from backend.src.services.stt_service import SpeechToTextService
 from backend.src.services.tool_router import ToolRouter
 from backend.src.services.tts_service import TextToSpeechService
@@ -32,14 +32,14 @@ class ResponseOrchestrator:
         intent_router: IntentRouter,
         tool_router: ToolRouter,
         voice_response_service: VoiceResponseService,
-        openclaw_service: OpenClawService,
+        model_service: ModelService,
     ):
         self.stt_service = stt_service
         self.tts_service = tts_service
         self.intent_router = intent_router
         self.tool_router = tool_router
         self.voice_response_service = voice_response_service
-        self.openclaw_service = openclaw_service
+        self.model_service = model_service
 
     def process_audio_turn(
         self,
@@ -71,7 +71,7 @@ class ResponseOrchestrator:
             selected_reason,
         )
 
-        result = self.openclaw_service.run_action(
+        result = self.model_service.run_action(
             transcript,
             workspace=workspace,
             model=model or selected_model,
@@ -82,7 +82,7 @@ class ResponseOrchestrator:
                 "MODEL_FALLBACK_TRIGGER from_model=%s to_model=gpt-4o-mini reason=primary_failed",
                 model or selected_model,
             )
-            result = self.openclaw_service.run_action(
+            result = self.model_service.run_action(
                 transcript,
                 workspace=workspace,
                 model="gpt-4o-mini",
