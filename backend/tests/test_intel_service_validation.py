@@ -93,3 +93,20 @@ def test_validate_event_payload_rejects_low_signal_world_news():
 
     with pytest.raises(ValueError, match="low_signal_event"):
         service.validate_event_payload(payload)
+
+
+def test_validate_event_payload_does_not_misclassify_claims_as_ai():
+    service = _service()
+    payload = {
+        "title": "Kenyan ex-foreign minister arrested and accused of staging his disappearance",
+        "summary": "The reported disappearance of Raphael Tuju had led to claims he may have been abducted.",
+        "category": "tech",
+        "importance": 6,
+        "source": "bbc_world",
+        "tags": ["dunya", "haber", "gundem"],
+    }
+
+    cleaned = service.validate_event_payload(payload)
+
+    assert cleaned["category"] == "global"
+    assert "ai" not in cleaned["tags"]

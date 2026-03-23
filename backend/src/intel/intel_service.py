@@ -43,7 +43,10 @@ _SOURCE_CATEGORY_HINTS = {
 _GENERIC_TAGS = {"dunya", "haber", "gundem", "news", "world", "update", "breaking"}
 _LOW_SIGNAL_WORLD_MARKERS = (
     "k-pop",
+    "bts",
+    "fans gather",
     "comeback show",
+    "comeback",
     "onlyfans",
     "pornographic content",
     "celebrity",
@@ -107,6 +110,18 @@ def _normalize_text(text: str) -> str:
         }
     )
     return low.translate(table)
+
+
+def _contains_keyword(blob: str, keyword: str) -> bool:
+    normalized_keyword = _normalize_text(keyword).strip()
+    if not normalized_keyword:
+        return False
+    if re.search(r"[a-z0-9]", normalized_keyword) is None:
+        return normalized_keyword in blob
+    if " " in normalized_keyword or "-" in normalized_keyword or "/" in normalized_keyword:
+        return normalized_keyword in blob
+    pattern = rf"(?<![a-z0-9]){re.escape(normalized_keyword)}(?![a-z0-9])"
+    return re.search(pattern, blob) is not None
 
 
 def _tokenize(text: str) -> set[str]:
@@ -178,7 +193,7 @@ def _infer_event_category(*, source: str, title: str, summary: str, category: st
         scores[source_hint] += 0.45
     for candidate, keywords in _category_keywords().items():
         for keyword in keywords:
-            if keyword in blob:
+            if _contains_keyword(blob, keyword):
                 scores[candidate] += 0.18
     best = max(scores.items(), key=lambda item: item[1])[0]
     return best if scores[best] > 0 else category
@@ -207,7 +222,7 @@ def _derive_tags(*, source: str, title: str, summary: str, category: str, tags: 
         "makro": ("usd/try", "eur/usd", "gbp/usd", "forex", "makro"),
     }
     for tag, markers in keyword_tags.items():
-        if any(marker in blob for marker in markers) and tag not in cleaned:
+        if any(_contains_keyword(blob, marker) for marker in markers) and tag not in cleaned:
             cleaned.append(tag)
 
     if source in {"bbc_world", "reuters"} and category == "global":
@@ -220,7 +235,7 @@ def _derive_tags(*, source: str, title: str, summary: str, category: str, tags: 
             "india": ("india",),
             "cuba": ("cuba",),
         }.items():
-            if any(marker in blob for marker in markers) and country_tag not in cleaned:
+            if any(_contains_keyword(blob, marker) for marker in markers) and country_tag not in cleaned:
                 cleaned.append(country_tag)
 
     if not cleaned and category:

@@ -1,5 +1,5 @@
 {
-  "name": "Macro Economy Feed v1",
+  "name": "Macro Economy Feed v2",
   "nodes": [
     {
       "parameters": {
@@ -7,7 +7,7 @@
           "interval": [
             {
               "field": "minutes",
-              "minutesInterval": 30
+              "minutesInterval": 60
             }
           ]
         }
@@ -53,7 +53,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const forexData = $('Get USD/TRY Rate').first().json || {};\n\nfunction num(v, fallback = 0) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : fallback;\n}\n\nconst tryRate = num(forexData.rates?.TRY);\nconst eurRate = num(forexData.rates?.EUR);\nconst gbpRate = num(forexData.rates?.GBP);\n\nif (tryRate === 0) return [];\n\nconst eurTry = eurRate ? tryRate / eurRate : 0;\nconst gbpTry = gbpRate ? tryRate / gbpRate : 0;\nconst eurUsd = eurRate ? (1 / eurRate) : 0;\nconst gbpUsd = gbpRate ? (1 / gbpRate) : 0;\n\nconst title = `Makro Ozet: USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}`;\nconst summary =\n  `USD/TRY ${tryRate.toFixed(2)} seviyesinde. ` +\n  `EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}, GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}. ` +\n  `EUR/USD ${eurUsd ? eurUsd.toFixed(4) : 'N/A'}, GBP/USD ${gbpUsd ? gbpUsd.toFixed(4) : 'N/A'}. ` +\n  `Kur tarafi su an Turkiye odakli fiyatlama ve enflasyon beklentileri icin izlenmeli.`;\n\nlet importance = 6;\nif (tryRate > 35 || eurTry > 38) importance = 7;\nif (tryRate > 38 || eurTry > 41) importance = 8;\nif (tryRate > 41 || eurTry > 44) importance = 9;\n\nreturn [{\n  json: {\n    source: 'er_api',\n    source_url: 'https://open.er-api.com/v6/latest/USD',\n    source_type: 'market_api',\n    type: 'intel',\n    title,\n    summary,\n    category: 'economy',\n    importance,\n    tags: ['makro', 'usdtry', 'eurtry', 'forex', 'turkiye'],\n    why_it_matters: 'Kur tarafi enflasyon, fiyatlama davranisi ve risk istahi icin temel gostergedir.',\n    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}`,\n    possible_outcomes: [\n      'Kur yukselisi surerse fiyatlama baskisi ve enflasyon beklentisi bozulabilir',\n      'Kur sakinlesirse kisa vadeli risk algisi yumusayabilir'\n    ],\n    confidence_hint: 0.9,\n    source_quality: 'high',\n    region: 'Turkey/Global',\n    market_relevance: 'high',\n    timestamp: new Date().toISOString()\n  }\n}];"
+        "jsCode": "const forexData = $('Get USD/TRY Rate').first().json || {};\n\nfunction num(v, fallback = 0) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : fallback;\n}\n\nconst tryRate = num(forexData.rates?.TRY);\nconst eurRate = num(forexData.rates?.EUR);\nconst gbpRate = num(forexData.rates?.GBP);\nconst jpyRate = num(forexData.rates?.JPY);\n\nif (tryRate === 0) return [];\n\nconst eurTry = eurRate ? tryRate / eurRate : 0;\nconst gbpTry = gbpRate ? tryRate / gbpRate : 0;\nconst jpyTry = jpyRate ? tryRate / jpyRate : 0;\nconst eurUsd = eurRate ? (1 / eurRate) : 0;\nconst gbpUsd = gbpRate ? (1 / gbpRate) : 0;\n\nconst title = `Makro Ozet: USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}`;\nconst summary =\n  `USD/TRY ${tryRate.toFixed(2)} seviyesinde. ` +\n  `EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}, GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}, JPY/TRY ${jpyTry ? jpyTry.toFixed(4) : 'N/A'}. ` +\n  `EUR/USD ${eurUsd ? eurUsd.toFixed(4) : 'N/A'}, GBP/USD ${gbpUsd ? gbpUsd.toFixed(4) : 'N/A'}. ` +\n  `Kur tarafi Turkiye odakli fiyatlama, ithalat maliyeti ve enflasyon beklentileri icin izlenmeli.`;\n\nlet importance = 6;\nif (tryRate > 35 || eurTry > 38) importance = 7;\nif (tryRate > 38 || eurTry > 41) importance = 8;\nif (tryRate > 41 || eurTry > 44) importance = 9;\n\nreturn [{\n  json: {\n    source: 'er_api',\n    source_url: 'https://open.er-api.com/v6/latest/USD',\n    source_type: 'market_api',\n    type: 'intel',\n    title,\n    summary,\n    category: 'economy',\n    importance,\n    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'forex'],\n    why_it_matters: 'Kur sepeti enflasyon, maliyet baskisi ve risk algisi icin temel gostergedir.',\n    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}`,\n    possible_outcomes: [\n      'Kur sepeti yukselirse fiyatlama baskisi ve enflasyon beklentisi bozulabilir',\n      'Dolar ve euro tarafi sakinlesirse kisa vadeli risk algisi yumusayabilir'\n    ],\n    confidence_hint: 0.9,\n    source_quality: 'high',\n    region: 'Turkey/Global',\n    market_relevance: 'high',\n    timestamp: new Date().toISOString()\n  }\n}];"
       },
       "id": "macro-build",
       "name": "Build Macro Intel Event",

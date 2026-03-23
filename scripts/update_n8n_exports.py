@@ -29,20 +29,22 @@ function num(v, fallback = 0) {
 const tryRate = num(forexData.rates?.TRY);
 const eurRate = num(forexData.rates?.EUR);
 const gbpRate = num(forexData.rates?.GBP);
+const jpyRate = num(forexData.rates?.JPY);
 
 if (tryRate === 0) return [];
 
 const eurTry = eurRate ? tryRate / eurRate : 0;
 const gbpTry = gbpRate ? tryRate / gbpRate : 0;
+const jpyTry = jpyRate ? tryRate / jpyRate : 0;
 const eurUsd = eurRate ? (1 / eurRate) : 0;
 const gbpUsd = gbpRate ? (1 / gbpRate) : 0;
 
-const title = `Makro Ozet: USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}`;
+const title = `Makro Ozet: USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}`;
 const summary =
   `USD/TRY ${tryRate.toFixed(2)} seviyesinde. ` +
-  `EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}, GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}. ` +
+  `EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}, GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}, JPY/TRY ${jpyTry ? jpyTry.toFixed(4) : 'N/A'}. ` +
   `EUR/USD ${eurUsd ? eurUsd.toFixed(4) : 'N/A'}, GBP/USD ${gbpUsd ? gbpUsd.toFixed(4) : 'N/A'}. ` +
-  `Kur tarafi su an Turkiye odakli fiyatlama ve enflasyon beklentileri icin izlenmeli.`;
+  `Kur tarafi Turkiye odakli fiyatlama, ithalat maliyeti ve enflasyon beklentileri icin izlenmeli.`;
 
 let importance = 6;
 if (tryRate > 35 || eurTry > 38) importance = 7;
@@ -59,12 +61,12 @@ return [{
     summary,
     category: 'economy',
     importance,
-    tags: ['makro', 'usdtry', 'eurtry', 'forex', 'turkiye'],
-    why_it_matters: 'Kur tarafi enflasyon, fiyatlama davranisi ve risk istahi icin temel gostergedir.',
-    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}`,
+    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'forex'],
+    why_it_matters: 'Kur sepeti enflasyon, maliyet baskisi ve risk algisi icin temel gostergedir.',
+    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}`,
     possible_outcomes: [
-      'Kur yukselisi surerse fiyatlama baskisi ve enflasyon beklentisi bozulabilir',
-      'Kur sakinlesirse kisa vadeli risk algisi yumusayabilir'
+      'Kur sepeti yukselirse fiyatlama baskisi ve enflasyon beklentisi bozulabilir',
+      'Dolar ve euro tarafi sakinlesirse kisa vadeli risk algisi yumusayabilir'
     ],
     confidence_hint: 0.9,
     source_quality: 'high',
@@ -79,10 +81,21 @@ if (!Array.isArray(items) || items.length === 0) return [];
 
 const cleanText = (v) => String(v || '').replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();
 const lower = (v) => cleanText(v).toLowerCase();
+const has = (text, marker) => {
+  const normalized = lower(text);
+  const target = lower(marker);
+  if (!target) return false;
+  if (target.includes(' ') || target.includes('-') || target.includes('/')) return normalized.includes(target);
+  const escaped = target.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(normalized);
+};
 
 const lowSignal = [
   'k-pop',
+  'bts',
+  'fans gather',
   'comeback show',
+  'comeback',
   'onlyfans',
   'pornographic content',
   'celebrity',
@@ -107,29 +120,25 @@ const tagRules = [
 ];
 
 const pickCategory = (text) => {
-  const low = lower(text);
-  if (low.includes('war') || low.includes('attack') || low.includes('military') || low.includes('conflict') || low.includes('troops') || low.includes('missile') || low.includes('hezbollah') || low.includes('nuclear')) return 'global';
-  if (low.includes('election') || low.includes('president') || low.includes('prime minister') || low.includes('government') || low.includes('parliament') || low.includes('minister')) return 'global';
-  if (low.includes('economy') || low.includes('market') || low.includes('trade') || low.includes('gdp') || low.includes('inflation') || low.includes('bank') || low.includes('oil') || low.includes('energy') || low.includes('sanctions')) return 'economy';
-  if (low.includes('cyber') || low.includes('hack') || low.includes('breach')) return 'security';
-  if (low.includes('tech') || low.includes('ai') || low.includes('software')) return 'tech';
+  if (['war', 'attack', 'military', 'conflict', 'troops', 'missile', 'hezbollah', 'nuclear', 'border', 'air strike'].some((marker) => has(text, marker))) return 'global';
+  if (['election', 'president', 'prime minister', 'government', 'parliament', 'minister'].some((marker) => has(text, marker))) return 'global';
+  if (['economy', 'market', 'trade', 'gdp', 'inflation', 'bank', 'oil', 'energy', 'sanctions', 'tariff', 'workers'].some((marker) => has(text, marker))) return 'economy';
+  if (['cyber', 'hack', 'breach', 'vulnerability', 'malware'].some((marker) => has(text, marker))) return 'security';
+  if (['tech', 'software', 'chip', 'semiconductor', 'platform'].some((marker) => has(text, marker))) return 'tech';
   return 'global';
 };
 
 const pickImportance = (text) => {
-  const low = lower(text);
-  if (low.includes('breaking') || low.includes('urgent') || low.includes('crisis') || low.includes('emergency')) return 9;
-  if (low.includes('war') || low.includes('attack') || low.includes('missile') || low.includes('nuclear') || low.includes('hezbollah')) return 8;
-  if (low.includes('election') || low.includes('president') || low.includes('prime minister') || low.includes('government')) return 7;
-  if (low.includes('economy') || low.includes('market') || low.includes('inflation') || low.includes('trade') || low.includes('sanctions')) return 7;
+  if (['breaking', 'urgent', 'crisis', 'emergency'].some((marker) => has(text, marker))) return 9;
+  if (['war', 'attack', 'missile', 'nuclear', 'hezbollah', 'ground invasion'].some((marker) => has(text, marker))) return 8;
+  if (['election', 'president', 'prime minister', 'government', 'trade', 'sanctions', 'tariff', 'blackout', 'power grid'].some((marker) => has(text, marker))) return 7;
   return 6;
 };
 
 const deriveTags = (text, category) => {
-  const low = lower(text);
   const tags = [];
   for (const [tag, markers] of tagRules) {
-    if (markers.some((marker) => low.includes(marker)) && !tags.includes(tag)) tags.push(tag);
+    if (markers.some((marker) => has(text, marker)) && !tags.includes(tag)) tags.push(tag);
   }
   if (!tags.length) tags.push(category);
   return tags.slice(0, 5);
@@ -152,13 +161,15 @@ const rows = items
       tags,
       link: row.link || 'https://bbc.com/news/world',
       isoDate: row.isoDate || new Date().toISOString(),
-      low: lower(fullText)
+      low: lower(fullText),
+      score: importance + (category === 'global' ? 0.4 : 0) + (category === 'economy' ? 0.2 : 0)
     };
   })
   .filter((row) => row.title && row.summary && row.summary.length >= 40)
   .filter((row) => !lowSignal.some((marker) => row.low.includes(marker)))
   .filter((row) => row.importance >= 7)
-  .slice(0, 8);
+  .sort((a, b) => b.score - a.score || new Date(b.isoDate).getTime() - new Date(a.isoDate).getTime())
+  .slice(0, 5);
 
 return rows.map((row) => ({
   json: {
@@ -223,6 +234,7 @@ def main() -> None:
     for filename, build_name, code in configs:
         src = ROOT / filename
         doc = json.loads(src.read_text(encoding="utf-8"))
+        doc["name"] = filename.replace(" v1.json", " v2")
         for node in doc["nodes"]:
             if node.get("name") == build_name:
                 node.setdefault("parameters", {})["jsCode"] = code
@@ -230,6 +242,10 @@ def main() -> None:
                 update_send_event(node)
             elif filename == "World News Feed v1.json" and node.get("name") == "Onem Esigi":
                 node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 7
+            elif filename == "World News Feed v1.json" and node.get("name") == "Schedule Trigger":
+                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 30
+            elif filename == "Macro Economy Feed v1.json" and node.get("name") == "Schedule Trigger":
+                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
         remove_login_and_rewire(doc)
         out_name = filename.replace(" v1.json", " v2.json")
         out_path = ROOT / out_name
