@@ -518,12 +518,12 @@ class IntelService:
         store: IntelStore,
         openai_client=None,
         profile_loader: Callable[[], dict] | None = None,
-        fast_model: str = "gpt-4o",
+        fast_model: str = "gpt-4o-mini",
     ):
         self.store = store
         self.openai_client = openai_client
         self.profile_loader = profile_loader
-        self.fast_model = (fast_model or "gpt-4o").strip()
+        self.fast_model = (fast_model or "gpt-4o-mini").strip()
 
     def get_latest_events(self, limit: int = 10) -> list[IntelEvent]:
         return self.store.get_latest_events(limit=limit)

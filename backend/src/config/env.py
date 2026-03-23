@@ -50,7 +50,7 @@ def load_settings() -> BackendSettings:
         ayex_chat_model=(os.environ.get("AYEX_CHAT_MODEL") or "claude-haiku-4-5-20251001").strip(),
         ayex_reasoning_model=(os.environ.get("AYEX_REASONING_MODEL") or "claude-sonnet-4-6").strip(),
         ayex_power_model=(os.environ.get("AYEX_POWER_MODEL") or "gpt-4.1").strip(),
-        ayex_fast_model=(os.environ.get("AYEX_FAST_MODEL") or "gpt-4o").strip(),
+        ayex_fast_model=(os.environ.get("AYEX_FAST_MODEL") or "gpt-4o-mini").strip(),
         model_instructions=(
             os.environ.get("AYEX_MODEL_INSTRUCTIONS")
             or (
@@ -147,7 +147,7 @@ def openai_api_key() -> str:
 def normalize_model_for_openai(model: str) -> str:
     raw = (model or "").strip()
     if not raw:
-        return "gpt-4o"
+        return "gpt-4o-mini"
     if "/" in raw:
         provider, name = raw.split("/", 1)
         if provider.strip().lower() in {"openai", "oai"} and name.strip():

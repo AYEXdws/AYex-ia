@@ -199,7 +199,7 @@ def _select_model_simple(
         chat_model=getattr(settings, "ayex_chat_model", "claude-haiku-4-5-20251001"),
         reasoning_model=getattr(settings, "ayex_reasoning_model", "claude-sonnet-4-6"),
         power_model=getattr(settings, "ayex_power_model", "gpt-4.1"),
-        fast_model=getattr(settings, "ayex_fast_model", "gpt-4o"),
+        fast_model=getattr(settings, "ayex_fast_model", "gpt-4o-mini"),
         intel_event_count=max(0, int(event_count or 0)),
         conversation_turn_count=max(0, int(conversation_turn_count or 0)),
         allow_anthropic=allow_anthropic,

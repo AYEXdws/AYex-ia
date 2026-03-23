@@ -271,7 +271,7 @@ class MemorySummarizer:
             "Sadece düz metin özet döndür."
         )
         try:
-            fast_model = (self.settings.ayex_fast_model or "gpt-4o").strip()
+            fast_model = (self.settings.ayex_fast_model or "gpt-4o-mini").strip()
             res = openai_client.call_responses(
                 prompt=prompt,
                 model=fast_model,

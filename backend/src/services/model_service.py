@@ -100,7 +100,7 @@ class ModelService:
                 return result
             except Exception as exc:
                 logger.warning("CLAUDE_FALLBACK error=%s fallback=%s", exc, self.settings.ayex_fast_model)
-                model_name = (self.settings.ayex_fast_model or "gpt-4o").strip()
+                model_name = (self.settings.ayex_fast_model or "gpt-4o-mini").strip()
                 normalized_model = normalize_model_for_openai(model_name)
 
         try:
@@ -267,7 +267,7 @@ class ModelService:
         self._cache[key] = (time.time(), result)
 
     def _resolve_model(self, requested_model: str | None) -> str:
-        default_model = (self.settings.ayex_chat_model or self.settings.ayex_model or "gpt-4o").strip()
+        default_model = (self.settings.ayex_chat_model or self.settings.ayex_model or "claude-haiku-4-5-20251001").strip()
         return (requested_model or default_model).strip()
 
     def _extract_usage_tokens(self, raw: dict) -> tuple[int, int]:
