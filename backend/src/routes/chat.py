@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
-from backend.src.services.model_router import ModelSelection
+from backend.src.services.model_router import ModelSelection, select_model
 from backend.src.utils.logging import get_logger, log_event
 
 router = APIRouter()
@@ -171,47 +171,23 @@ def _select_model_simple(
     text: str,
     event_count: int,
     settings: Any,
+    *,
+    conversation_turn_count: int = 0,
+    allow_anthropic: bool = True,
+    allow_openai: bool = True,
 ) -> ModelSelection:
-    """Basit model secimi."""
-    chat_model = getattr(settings, "ayex_chat_model", "claude-haiku-4.5")
-    reasoning_model = getattr(settings, "ayex_reasoning_model", "claude-sonnet-4.6")
-    power_model = getattr(settings, "ayex_power_model", "gpt-5")
-
-    low = (text or "").lower().strip()
-    text_len = len(text or "")
-
-    def _provider(model: str) -> str:
-        model_low = str(model or "").lower()
-        if any(x in model_low for x in ("claude", "haiku", "sonnet", "opus")):
-            return "anthropic"
-        return "openai"
-
-    power_signals = (
-        "almalıyım",
-        "almaliyim",
-        "almali",
-        "satmalıyım",
-        "satmaliyim",
-        "satmali",
-        "strateji",
-        "yatırım",
-        "yatirim",
-        "portföy",
-        "portfolio",
-        "en karlı",
-        "en karli",
-        "risk analizi",
-        "uzun vadede",
-        "kısa vadede",
-        "kisa vadede",
+    """Sistematik model secimi (4 model)."""
+    return select_model(
+        text=text,
+        chat_model=getattr(settings, "ayex_chat_model", "claude-haiku-4.5"),
+        reasoning_model=getattr(settings, "ayex_reasoning_model", "claude-sonnet-4.6"),
+        power_model=getattr(settings, "ayex_power_model", "gpt-5"),
+        fast_model=getattr(settings, "ayex_fast_model", "gpt-4o-mini"),
+        intel_event_count=max(0, int(event_count or 0)),
+        conversation_turn_count=max(0, int(conversation_turn_count or 0)),
+        allow_anthropic=allow_anthropic,
+        allow_openai=allow_openai,
     )
-    if any(s in low for s in power_signals):
-        return ModelSelection(model=power_model, provider=_provider(power_model), reason="strategy_query", route="power")
-
-    if text_len > 80 or event_count > 5:
-        return ModelSelection(model=reasoning_model, provider=_provider(reasoning_model), reason="complex_query", route="reasoning")
-
-    return ModelSelection(model=chat_model, provider=_provider(chat_model), reason="default", route="chat")
 
 
 def _maybe_trigger_memory_summary(services: BackendServices, session_id: str) -> None:
@@ -352,30 +328,88 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         text=text,
         event_count=event_count,
         settings=services.settings,
+        conversation_turn_count=(len(history) // 2) + int(getattr(session, "turn_count", 0) or 0),
+        allow_anthropic=bool(getattr(services.model, "anthropic_client", None)),
+        allow_openai=True,
     )
     logger.info(
-        "CHAT_FLOW user=%s text_len=%d events=%d model=%s route=%s",
+        "CHAT_FLOW user=%s text_len=%d events=%d model=%s route=%s confidence=%.2f reason=%s signals=%s chain=%s",
         user_id,
         len(text),
         event_count,
         model_selection.model,
         model_selection.route,
+        float(getattr(model_selection, "confidence", 0.0) or 0.0),
+        model_selection.reason,
+        ",".join(getattr(model_selection, "signals", ()) or ()) or "none",
+        " -> ".join(getattr(model_selection, "fallback_chain", ()) or (model_selection.model,)),
     )
 
     result = None
     reply = ""
+    model_input = text
+    used_model_for_reply = model_selection.model
+    # Power sorularda iki model birlikte calisir:
+    # Sonnet analiz cikarir, Power model son karari verir.
+    if model_selection.route == "power":
+        reasoning_model = str(getattr(services.settings, "ayex_reasoning_model", "") or "").strip()
+        if reasoning_model and reasoning_model != model_selection.model:
+            try:
+                pre_result = services.model.run_action(
+                    text=f"{text}\n\nGorev: Yatirim/strateji sorusu icin riskleri, alternatifleri ve varsayimlari kisa analiz et.",
+                    workspace=payload.workspace,
+                    model=reasoning_model,
+                    history=history,
+                    profile_context=system_prompt,
+                    memory_context=memory_context,
+                    response_style="deep",
+                    route_name="chat_power_pre_reasoning",
+                )
+                pre_text = str(getattr(pre_result, "text", "") or "").strip()
+                if pre_text:
+                    model_input = f"{text}\n\nOn analiz notlari:\n{pre_text[:1800]}"
+                    logger.info(
+                        "CHAT_MODEL_COLLAB pre_model=%s pre_tokens=%s",
+                        reasoning_model,
+                        len(pre_text.split()),
+                    )
+            except Exception as exc:
+                logger.info("CHAT_MODEL_COLLAB_SKIP error=%s", exc)
+
+    fallback_chain = list(getattr(model_selection, "fallback_chain", ()) or (model_selection.model,))
+    max_attempts = 3
+    if not fallback_chain:
+        fallback_chain = [model_selection.model]
+    attempt_models = fallback_chain[:max_attempts]
     try:
-        result = services.model.run_action(
-            text,
-            workspace=payload.workspace,
-            model=model_selection.model,
-            history=history,
-            profile_context=system_prompt,
-            memory_context=memory_context,
-            response_style="normal",
-            route_name=f"chat_{model_selection.route}",
-        )
-        reply = str(getattr(result, "text", "") or "").strip()
+        for idx, candidate_model in enumerate(attempt_models):
+            result = services.model.run_action(
+                model_input,
+                workspace=payload.workspace,
+                model=candidate_model,
+                history=history,
+                profile_context=system_prompt,
+                memory_context=memory_context,
+                response_style="normal",
+                route_name=f"chat_{model_selection.route}_attempt{idx + 1}",
+            )
+            reply = str(getattr(result, "text", "") or "").strip()
+            used_model_for_reply = str(getattr(result, "used_model", "") or candidate_model)
+            if reply and len(reply) >= 10:
+                if idx > 0:
+                    logger.info(
+                        "CHAT_MODEL_FAILOVER_SUCCESS attempt=%d model=%s",
+                        idx + 1,
+                        used_model_for_reply,
+                    )
+                break
+            logger.warning(
+                "CHAT_MODEL_FAILOVER_NEXT attempt=%d model=%s ok=%s text_len=%d",
+                idx + 1,
+                candidate_model,
+                bool(getattr(result, "ok", False)),
+                len(reply),
+            )
     except Exception as exc:
         logger.error("CHAT_LLM_ERROR error=%s", str(exc))
         reply = ""
@@ -385,7 +419,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
 
     latency_ms = int(getattr(result, "latency_ms", 0) or 0)
     source = str(getattr(result, "source", "") or "openai_direct")
-    used_model = str(getattr(result, "used_model", "") or model_selection.model)
+    used_model = str(getattr(result, "used_model", "") or used_model_for_reply or model_selection.model)
     response_style = str(getattr(result, "response_style", "") or "normal")
 
     services.chat_store.append_message(
@@ -399,6 +433,9 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             "model": used_model,
             "used_model": used_model,
             "route": model_selection.route,
+            "route_reason": model_selection.reason,
+            "route_confidence": float(getattr(model_selection, "confidence", 0.0) or 0.0),
+            "route_signals": list(getattr(model_selection, "signals", ()) or ()),
             "event_count": event_count,
             "source": source,
             "mode": response_style,
@@ -443,6 +480,9 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             "source": source,
             "mode": response_style,
             "response_style": response_style,
+            "route": model_selection.route,
+            "route_reason": model_selection.reason,
+            "route_confidence": float(getattr(model_selection, "confidence", 0.0) or 0.0),
             "event_count": event_count,
         },
     )
