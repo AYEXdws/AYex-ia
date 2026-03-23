@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hmac
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -33,6 +35,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not self._is_protected(path):
             return await call_next(request)
 
+        if self._accept_ingest_token(request):
+            return await call_next(request)
+
         auth_header = request.headers.get("Authorization") or ""
         parts = auth_header.strip().split()
         if len(parts) != 2 or parts[0].lower() != "bearer":
@@ -59,3 +64,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if path == prefix or path.startswith(f"{prefix}/"):
                 return True
         return False
+
+    def _accept_ingest_token(self, request: Request) -> bool:
+        path = request.url.path or ""
+        if path != "/events/ingest":
+            return False
+
+        services = getattr(request.app.state, "services", None)
+        settings = getattr(services, "settings", None)
+        expected = str(getattr(settings, "intel_ingest_token", "") or "").strip()
+        if not expected:
+            return False
+
+        provided = (request.headers.get("x-ayex-ingest-token") or request.headers.get("x-intel-token") or "").strip()
+        if not provided or not hmac.compare_digest(provided, expected):
+            return False
+
+        request.state.user_id = "intel_ingest"
+        logger.info("AUTH_ACCEPTED path=%s user_id=%s via=ingest_token", path, request.state.user_id)
+        return True
