@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 from datetime import datetime
 from typing import Any
@@ -215,6 +216,50 @@ def _should_force_grounded_reply(reply: str) -> bool:
     return any(marker in low for marker in _NO_DATA_MARKERS)
 
 
+def _event_reference_tokens(key_events: list[dict[str, Any]]) -> set[str]:
+    stop = {
+        "ahmet",
+        "guncel",
+        "güncel",
+        "makro",
+        "ozet",
+        "özet",
+        "bugun",
+        "bugünkü",
+        "today",
+        "market",
+        "piyasa",
+        "intel",
+        "feed",
+        "news",
+        "risk",
+        "global",
+        "world",
+    }
+    out: set[str] = set()
+    for item in key_events[:3]:
+        title = str(item.get("title") or "")
+        tags = " ".join([str(t) for t in (item.get("tags") or [])[:4]])
+        for token in re.findall(r"[a-zA-Z0-9+/.-]{3,}", f"{title} {tags}".lower()):
+            if token in stop:
+                continue
+            if token.isdigit():
+                continue
+            out.add(token)
+    return out
+
+
+def _reply_mentions_key_events(reply: str, key_events: list[dict[str, Any]], decision: dict[str, Any] | None = None) -> bool:
+    low = _normalize_reply(reply)
+    asset = str((decision or {}).get("asset") or "").strip().lower()
+    if asset and asset in low:
+        return True
+    for token in _event_reference_tokens(key_events):
+        if token in low:
+            return True
+    return False
+
+
 def _build_grounded_reply(*, query_ctx: Any, decision: dict[str, Any] | None = None) -> str:
     row = dict(decision or {})
     key_events = list(query_ctx.intel_context.get("key_events") or [])[:3]
@@ -248,10 +293,16 @@ def _build_grounded_reply(*, query_ctx: Any, decision: dict[str, Any] | None = N
 
 def _enforce_grounded_intel_reply(*, reply: str, query_ctx: Any, decision: dict[str, Any] | None = None) -> str:
     text = str(reply or "").strip()
-    key_events = list(query_ctx.intel_context.get("key_events") or [])
+    key_events = [dict(item) for item in list(query_ctx.intel_context.get("key_events") or [])]
     if not key_events:
         return text
-    if not _should_force_grounded_reply(text):
+    top_match = 0.0
+    try:
+        top_match = float(key_events[0].get("query_match_score") or 0.0)
+    except Exception:
+        top_match = 0.0
+    has_event_reference = _reply_mentions_key_events(text, key_events, decision)
+    if not _should_force_grounded_reply(text) and (top_match < 0.30 or has_event_reference):
         return text
     fallback = _build_grounded_reply(query_ctx=query_ctx, decision=decision)
     return fallback or text

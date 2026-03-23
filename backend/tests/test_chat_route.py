@@ -202,3 +202,33 @@ def test_enforce_grounded_intel_reply_replaces_false_no_data():
     assert "veri yok" not in out.lower()
     assert "ASML" in out
     assert "Makro Ozet" in out
+
+
+def test_enforce_grounded_intel_reply_replaces_unanchored_generic_reply_when_match_is_strong():
+    query_ctx = SimpleNamespace(
+        intel_context={
+            "key_events": [
+                {
+                    "title": "Makro Ozet: USD/TRY 44.34 | EUR/TRY 51.25",
+                    "summary": "USD/TRY 44.34 seviyesinde. EUR/TRY 51.25.",
+                    "query_match_score": 0.72,
+                    "tags": ["makro", "usdtry", "eurtry"],
+                },
+                {
+                    "title": "Makro Ozet: XAU/USD 4450.04",
+                    "summary": "Ons altin guclu.",
+                    "query_match_score": 0.51,
+                    "tags": ["xauusd", "altin"],
+                },
+            ]
+        }
+    )
+
+    out = _enforce_grounded_intel_reply(
+        reply="Makro tarafta genel risk istahi dikkat cekiyor.",
+        query_ctx=query_ctx,
+        decision={},
+    )
+
+    assert "USD/TRY" in out
+    assert "XAU/USD" in out

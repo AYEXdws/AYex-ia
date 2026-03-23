@@ -455,6 +455,37 @@ def _source_query_boost(source: str, query_topics: list[str], query_categories: 
     return boost
 
 
+def _preferred_sources_for_query(query: str, query_topics: list[str], query_categories: set[str]) -> set[str]:
+    q_norm = _normalize_text(query)
+    preferred: set[str] = set()
+
+    if any(_contains_keyword(q_norm, marker) for marker in ("makro", "macro", "kur", "doviz", "forex", "usdtry", "eurtry", "gbptry", "altin", "xau")):
+        preferred.add("er_api")
+
+    if any(_contains_keyword(q_norm, marker) for marker in ("hisse", "hisseler", "stock", "stocks", "equity", "equities", "borsa", "senet")):
+        preferred.add("yahoo_finance")
+
+    if "crypto" in query_topics or any(_contains_keyword(q_norm, marker) for marker in ("kripto", "coin", "token", "bitcoin", "ethereum", "btc", "eth")):
+        preferred.add("coingecko")
+
+    if "security" in query_categories or any(_contains_keyword(q_norm, marker) for marker in ("siber", "cyber", "hack", "ihlal", "vuln", "cve", "tehdit", "guvenlik")):
+        preferred.add("the_hacker_news")
+
+    if "global" in query_categories or any(_contains_keyword(q_norm, marker) for marker in ("dunya", "world", "jeopolitik", "savas", "ukrayna", "iran", "israil", "lebnan", "secm")):
+        preferred.update({"bbc_world", "reuters"})
+
+    return preferred
+
+
+def _source_preference_adjustment(source: str, preferred_sources: set[str]) -> float:
+    if not preferred_sources:
+        return 0.0
+    src = _normalize_text(source).strip()
+    if src in preferred_sources:
+        return 0.38
+    return -0.22
+
+
 def _is_noise_event(event: IntelEvent) -> bool:
     source_norm = _normalize_text(str(event.source or ""))
     if source_norm in {"test", "demo", "synthetic"}:
@@ -1179,6 +1210,7 @@ def select_relevant_intel_context(
     query_tokens = set(query_info.get("tokens") or [])
     query_topics = list(query_info.get("topics") or [])
     query_categories = set(query_info.get("category_bias") or [])
+    preferred_sources = _preferred_sources_for_query(query, query_topics, query_categories)
     general_query = is_general_news_query(query)
 
     events = service.store.get_all_events()
@@ -1334,7 +1366,11 @@ def select_relevant_intel_context(
         topic_hit = _event_topic_hits(event, query_topics)
         category_bias_boost = 0.15 if query_categories and _normalize_text(event.category) in query_categories else 0.0
         source_boost = _source_query_boost(str(getattr(event, "source", "") or ""), query_topics, query_categories)
-        query_match_score = min(1.0, (overlap_norm * 0.60) + (topic_hit * 0.25) + category_bias_boost + source_boost)
+        source_preference = _source_preference_adjustment(str(getattr(event, "source", "") or ""), preferred_sources)
+        query_match_score = min(
+            1.0,
+            max(0.0, (overlap_norm * 0.60) + (topic_hit * 0.25) + category_bias_boost + source_boost + source_preference),
+        )
 
         event_cat = _normalize_text(event.category)
         if query_categories and event_cat not in query_categories and topic_hit <= 0.0 and overlap_raw <= 0.0:
