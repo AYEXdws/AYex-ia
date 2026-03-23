@@ -120,6 +120,29 @@ def test_enforce_decision_reply_prepends_clear_headline():
     assert "Risk:" in out
 
 
+def test_enforce_decision_reply_strips_repeated_headline_from_model_text():
+    decision = {
+        "active": True,
+        "asset": "SOL",
+        "stance": "buy",
+        "summary": "Ahmet, su an en mantikli secenek SOL.",
+        "reasons": ["Momentum daha temiz."],
+        "risks": ["Ani geri cekilme riski var."],
+    }
+
+    out = enforce_decision_reply(
+        decision=decision,
+        reply=(
+            "Ahmet, su an en mantikli secenek SOL.\n\n"
+            "SOL 1 aylik pencerede daha guclu momentum tasiyor."
+        ),
+        strict=True,
+    )
+
+    assert out.count("Ahmet, su an en mantikli secenek SOL.") == 1
+    assert "SOL 1 aylik pencerede daha guclu momentum tasiyor." in out
+
+
 def test_proactive_briefing_returns_compare_and_priorities():
     now = datetime.utcnow()
     intel = SimpleNamespace(

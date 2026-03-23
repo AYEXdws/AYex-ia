@@ -246,9 +246,10 @@ def enforce_decision_reply(*, decision: dict[str, Any] | None, reply: str, stric
         return "\n".join(base_lines)
 
     if strict:
-        if _normalize(text).startswith(normalized_headline):
-            return "\n".join(base_lines + ([text] if len(text) > len(headline) + 12 else []))
-        return "\n".join(base_lines + [text])
+        cleaned = _strip_redundant_decision_text(text=text, headline=headline)
+        if _normalize(cleaned).startswith(normalized_headline):
+            cleaned = ""
+        return "\n".join(base_lines + ([cleaned] if len(cleaned) > 24 else []))
 
     if _normalize(text).startswith(normalized_headline):
         return text
@@ -257,6 +258,24 @@ def enforce_decision_reply(*, decision: dict[str, Any] | None, reply: str, stric
 
 def is_market_decision_query(text: str) -> bool:
     return _is_market_decision_query(_normalize(text))
+
+
+def _strip_redundant_decision_text(*, text: str, headline: str) -> str:
+    normalized_headline = _normalize(headline)
+    lines = [str(line).strip() for line in str(text or "").splitlines()]
+    kept: list[str] = []
+    skipping = True
+    for line in lines:
+        if not line:
+            if not skipping and kept and kept[-1] != "":
+                kept.append("")
+            continue
+        normalized_line = _normalize(line.lstrip("*#- "))
+        if skipping and (normalized_line == normalized_headline or normalized_headline in normalized_line):
+            continue
+        skipping = False
+        kept.append(line)
+    return "\n".join(kept).strip()
 
 
 def _score_event(
