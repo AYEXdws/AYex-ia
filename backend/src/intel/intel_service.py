@@ -61,6 +61,17 @@ _LOW_SIGNAL_WORLD_MARKERS = (
     "tv star",
     "reality show",
     "billionaire owner",
+    "human remains",
+    "missing person",
+    "abduction fears",
+    "resurfaces after",
+    "viral clip",
+    "wedding",
+    "royal style",
+    "love island",
+    "talent show",
+    "festival crowd",
+    "city center celebration",
 )
 _HIGH_SIGNAL_WORLD_MARKERS = (
     "war",
@@ -296,16 +307,18 @@ def _derive_tags(*, source: str, title: str, summary: str, category: str, tags: 
 def _is_low_signal_world_event(*, source: str, title: str, summary: str, importance: int, category: str) -> bool:
     if source not in {"bbc_world", "reuters"}:
         return False
-    if importance >= 8:
+    if importance >= 9:
         return False
     if category in {"security", "economy"}:
         return False
     blob = _normalize_text(" ".join([title, summary]))
     has_strategic_signal = any(_contains_keyword(blob, marker) for marker in _HIGH_SIGNAL_WORLD_MARKERS)
-    if category == "global" and importance < 7 and not has_strategic_signal:
+    if category == "global" and importance < 8 and not has_strategic_signal:
         return True
-    if any(marker in blob for marker in _LOW_SIGNAL_WORLD_MARKERS):
-        return not has_strategic_signal
+    if importance <= 6 and not has_strategic_signal:
+        return True
+    if any(_contains_keyword(blob, marker) for marker in _LOW_SIGNAL_WORLD_MARKERS):
+        return not (has_strategic_signal and importance >= 8)
     return False
 
 

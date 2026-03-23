@@ -127,6 +127,21 @@ def test_validate_event_payload_does_not_misclassify_claims_as_ai():
     assert "ai" not in cleaned["tags"]
 
 
+def test_validate_event_payload_rejects_low_signal_missing_person_world_news():
+    service = _service()
+    payload = {
+        "title": "Minister resurfaces after abduction fears in local political drama",
+        "summary": "Missing person claims triggered media attention before the politician resurfaced safely.",
+        "category": "global",
+        "importance": 7,
+        "source": "bbc_world",
+        "tags": ["world"],
+    }
+
+    with pytest.raises(ValueError, match="low_signal_event"):
+        service.validate_event_payload(payload)
+
+
 def test_select_relevant_intel_context_prefers_macro_source_over_profile_crypto_bias():
     service = IntelService(
         IntelStore(),

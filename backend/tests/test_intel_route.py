@@ -80,6 +80,36 @@ class _FakeServices:
                 "focus_projects": ["AYEX-IA"],
             }
         )
+        self.chat_store = SimpleNamespace(
+            list_sessions=lambda limit=18: [
+                {
+                    "id": "sess-1",
+                    "title": "Kripto karari",
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            ],
+            messages=lambda session_id, limit=80: [
+                {
+                    "id": "msg-1",
+                    "session_id": session_id,
+                    "ts": datetime.utcnow().isoformat(),
+                    "role": "assistant",
+                    "text": "Ahmet, su an en mantikli secenek SOL.\n\nNeden: momentum daha guclu.",
+                    "metrics": {
+                        "response_mode": "decision",
+                        "source": "model_direct",
+                        "explainability": {
+                            "response_mode": "decision",
+                            "decision": "Ahmet, su an en mantikli secenek SOL.",
+                            "decision_asset": "SOL",
+                            "decision_stance": "conviction",
+                            "reasons": ["SOL guclu momentum tasiyor."],
+                            "risks": ["BTC zayiflarsa geri cekilme olabilir."],
+                        },
+                    },
+                }
+            ],
+        )
 
 
 def test_intel_brief_includes_market_focus_cards():
@@ -103,6 +133,9 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["live_inventory"]["feeds"]["cyber"]["available"] is True
     assert payload["persona_focus"]["assistant_name"] == "AYEX"
     assert payload["persona_focus"]["feedback_style"] == "sert ve net"
+    assert payload["decision_history"]
+    assert payload["decision_history"][0]["asset"] == "SOL"
+    assert payload["decision_history"][0]["response_mode"] == "decision"
 
 
 def test_public_intel_exposes_curated_sections():

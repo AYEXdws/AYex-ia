@@ -18,6 +18,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
   const domainFocus = intelBrief?.domain_focus || null;
   const liveInventory = intelBrief?.live_inventory?.feeds || null;
   const personaFocus = intelBrief?.persona_focus || null;
+  const decisionHistory = Array.isArray(intelBrief?.decision_history) ? intelBrief.decision_history : [];
   return (
     <motion.aside
       className="glass-card h-full w-full p-5 md:p-6"
@@ -109,6 +110,21 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
         <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">ASSET SINYALLERI</div>
         <SignalGroup label="Kripto" rows={marketFocus?.crypto_signals} />
         <SignalGroup label="Hisse" rows={marketFocus?.equities_signals} />
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">SON KARARLAR</div>
+        {decisionHistory.length ? (
+          <div className="space-y-3">
+            {decisionHistory.slice(0, 4).map((row, index) => (
+              <DecisionHistoryRow key={`${row.session_id}-${row.timestamp}-${index}`} row={row} />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3 text-sm text-[var(--muted)]">
+            Karar gecmisi henuz birikmedi.
+          </div>
+        )}
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
@@ -241,6 +257,23 @@ function FeedRow({ label, row }) {
         </div>
       </div>
       <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{summary}</div>
+    </div>
+  );
+}
+
+function DecisionHistoryRow({ row }) {
+  const title = row?.asset ? `${row.asset} · ${row.stance || 'watch'}` : row?.stance || 'karar';
+  const summary = row?.summary || 'Karar ozeti yok.';
+  const reasons = Array.isArray(row?.reasons) ? row.reasons.slice(0, 1) : [];
+  const session = row?.session_title || 'Oturum';
+  return (
+    <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-medium text-[var(--text)]">{title}</div>
+        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">{session}</div>
+      </div>
+      <div className="mt-2 text-sm leading-6 text-[var(--text)]">{summary}</div>
+      {reasons.length ? <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{reasons[0]}</div> : null}
     </div>
   );
 }
