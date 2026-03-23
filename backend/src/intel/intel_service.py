@@ -1255,7 +1255,20 @@ def select_relevant_intel_context(
             logger.info("INTEL_TIMEFRAME mode=single count=%s label=%s", len(scoped), timeframe_label)
 
     timeframe_active = bool(scoped_events is not None)
-    candidate_events = list(scoped_events or (events if general_query else profile_filtered))
+    if scoped_events is not None:
+        candidate_events = list(scoped_events)
+    elif general_query:
+        candidate_events = list(events)
+    elif preferred_sources:
+        preferred_rows = [
+            event
+            for event in events
+            if _normalize_text(str(getattr(event, "source", "") or "")).strip() in preferred_sources
+        ]
+        seen_ids = {_event_identity(event) for event in preferred_rows}
+        candidate_events = preferred_rows + [event for event in profile_filtered if _event_identity(event) not in seen_ids]
+    else:
+        candidate_events = list(profile_filtered)
 
     if general_query:
         selected_general = _pick_general_latest_events(
