@@ -136,6 +136,8 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["decision_history"]
     assert payload["decision_history"][0]["asset"] == "SOL"
     assert payload["decision_history"][0]["response_mode"] == "decision"
+    assert payload["decision_history"][0]["status"] in {"beklemede", "izlenmeli", "arsiv"}
+    assert payload["decision_history"][0]["age_label"]
 
 
 def test_public_intel_exposes_curated_sections():

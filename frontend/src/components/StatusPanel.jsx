@@ -266,11 +266,17 @@ function DecisionHistoryRow({ row }) {
   const summary = row?.summary || 'Karar ozeti yok.';
   const reasons = Array.isArray(row?.reasons) ? row.reasons.slice(0, 1) : [];
   const session = row?.session_title || 'Oturum';
+  const age = row?.age_label || 'unknown';
+  const status = row?.status || 'unknown';
   return (
     <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-medium text-[var(--text)]">{title}</div>
         <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">{session}</div>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+        <span>{status}</span>
+        <span>{age}</span>
       </div>
       <div className="mt-2 text-sm leading-6 text-[var(--text)]">{summary}</div>
       {reasons.length ? <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{reasons[0]}</div> : null}

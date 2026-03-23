@@ -69,6 +69,10 @@ const jpyTry = jpyRate ? tryRate / jpyRate : 0;
 const eurUsd = eurRate ? (1 / eurRate) : 0;
 const gbpUsd = gbpRate ? (1 / gbpRate) : 0;
 const goldTry = goldUsd ? goldUsd * tryRate : 0;
+const fxStress = tryRate > 41 || eurTry > 46 || gbpTry > 53;
+const safeHaven = goldUsd > 4300 || goldTry > 180000;
+const importPressure = tryRate > 38 || eurTry > 43;
+const riskMode = fxStress && safeHaven ? 'savunmaci' : fxStress ? 'kur baskisi' : safeHaven ? 'guvenli liman' : 'dengeli';
 
 const title = `Makro Ozet: USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}`;
 const summary =
@@ -76,7 +80,7 @@ const summary =
   `EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}, GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}, JPY/TRY ${jpyTry ? jpyTry.toFixed(4) : 'N/A'}. ` +
   `EUR/USD ${eurUsd ? eurUsd.toFixed(4) : 'N/A'}, GBP/USD ${gbpUsd ? gbpUsd.toFixed(4) : 'N/A'}. ` +
   `XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'}, ons altin TRY karsiligi ${goldTry ? goldTry.toFixed(0) : 'N/A'}. ` +
-  `Kur tarafi Turkiye odakli fiyatlama, ithalat maliyeti ve enflasyon beklentileri icin izlenmeli.`;
+  `Risk modu su an ${riskMode}. Kur tarafi Turkiye odakli fiyatlama, ithalat maliyeti ve enflasyon beklentileri icin izlenmeli.`;
 
 let importance = 6;
 if (tryRate > 35 || eurTry > 38) importance = 7;
@@ -84,6 +88,7 @@ if (tryRate > 38 || eurTry > 41) importance = 8;
 if (tryRate > 41 || eurTry > 44) importance = 9;
 if (goldTry > 130000) importance = Math.max(importance, 7);
 if (goldTry > 145000) importance = Math.max(importance, 8);
+if (fxStress && safeHaven) importance = Math.max(importance, 9);
 
 return [{
   json: {
@@ -95,9 +100,9 @@ return [{
     summary,
     category: 'economy',
     importance,
-    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'xauusd'],
-    why_it_matters: 'Kur sepeti ve ons altin birlikte bakildiginda hem enflasyon baskisi hem de guvenli liman talebi daha net okunur.',
-    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'}`,
+    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'xauusd', riskMode],
+    why_it_matters: 'Kur sepeti, dolar paritesi ve ons altin birlikte bakildiginda hem enflasyon baskisi hem de riskten kacis daha net okunur.',
+    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'} | mod ${riskMode}`,
     possible_outcomes: [
       'Kur sepeti ve altin birlikte yukselirse savunmaci fiyatlama ve riskten kacis guclenebilir',
       'Kur sakinlesip altin gevserse kisa vadeli risk algisi yumusayabilir'
@@ -135,8 +140,20 @@ const lowSignal = [
   'celebrity',
   'showbiz',
   'entertainment',
-  'influencer'
+  'influencer',
+  'missing person',
+  'abduction fears',
+  'resurfaces after',
+  'tv star',
+  'viral clip',
+  'wedding',
+  'festival crowd',
+  'city center celebration'
 ];
+
+const strategicMarkers = ['war', 'conflict', 'troops', 'ground invasion', 'missile', 'ballistic', 'hezbollah', 'nuclear', 'attack', 'border', 'sanction', 'tariff', 'trade', 'oil', 'gas', 'energy', 'blackout', 'power grid'];
+const politicalMarkers = ['election', 'president', 'prime minister', 'government', 'parliament', 'minister'];
+const economicMarkers = ['trade', 'tariff', 'sanction', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'workers', 'inflation', 'gdp', 'bank'];
 
 const tagRules = [
   ['war', ['war', 'conflict', 'troops', 'ground invasion']],
@@ -154,8 +171,8 @@ const tagRules = [
 ];
 
 const pickCategory = (text) => {
-  if (['war', 'attack', 'military', 'conflict', 'troops', 'missile', 'hezbollah', 'nuclear', 'border', 'air strike'].some((marker) => has(text, marker))) return 'global';
-  if (['election', 'president', 'prime minister', 'government', 'parliament', 'minister'].some((marker) => has(text, marker))) return 'global';
+  if (strategicMarkers.some((marker) => has(text, marker))) return 'global';
+  if (politicalMarkers.some((marker) => has(text, marker))) return 'global';
   if (['economy', 'market', 'trade', 'gdp', 'inflation', 'bank', 'oil', 'energy', 'sanctions', 'tariff', 'workers'].some((marker) => has(text, marker))) return 'economy';
   if (['cyber', 'hack', 'breach', 'vulnerability', 'malware'].some((marker) => has(text, marker))) return 'security';
   if (['tech', 'software', 'chip', 'semiconductor', 'platform'].some((marker) => has(text, marker))) return 'tech';
@@ -187,23 +204,30 @@ const rows = items
     const category = pickCategory(fullText);
     const importance = pickImportance(fullText);
     const tags = deriveTags(fullText, category);
+    const strategic = strategicMarkers.some((marker) => has(fullText, marker));
+    const political = politicalMarkers.some((marker) => has(fullText, marker));
+    const economic = economicMarkers.some((marker) => has(fullText, marker));
     return {
       title,
       summary: snippet.slice(0, 600),
       category,
       importance,
       tags,
+      strategic,
+      political,
+      economic,
       link: row.link || 'https://bbc.com/news/world',
       isoDate: row.isoDate || new Date().toISOString(),
       low: lower(fullText),
-      score: importance + (category === 'global' ? 0.4 : 0) + (category === 'economy' ? 0.2 : 0)
+      score: importance + (strategic ? 0.8 : 0) + (political ? 0.4 : 0) + (economic ? 0.4 : 0)
     };
   })
-  .filter((row) => row.title && row.summary && row.summary.length >= 40)
+  .filter((row) => row.title && row.summary && row.summary.length >= 70)
   .filter((row) => !lowSignal.some((marker) => row.low.includes(marker)))
   .filter((row) => row.importance >= 7)
+  .filter((row) => row.strategic || row.political || row.economic || row.importance >= 8)
   .sort((a, b) => b.score - a.score || new Date(b.isoDate).getTime() - new Date(a.isoDate).getTime())
-  .slice(0, 5);
+  .slice(0, 3);
 
 return rows.map((row) => ({
   json: {
@@ -277,7 +301,7 @@ def main() -> None:
             elif filename == "World News Feed v1.json" and node.get("name") == "Onem Esigi":
                 node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 7
             elif filename == "World News Feed v1.json" and node.get("name") == "Schedule Trigger":
-                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 30
+                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
             elif filename == "Macro Economy Feed v1.json" and node.get("name") == "Schedule Trigger":
                 node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
         remove_login_and_rewire(doc)

@@ -68,6 +68,8 @@ def _decision_row(*, message: dict[str, Any], session_id: str, session_title: st
         "session_id": session_id,
         "session_title": session_title,
         "timestamp": iso_ts,
+        "age_label": _age_label(iso_ts),
+        "status": _status_for_decision(iso_ts),
         "response_mode": response_mode or "decision",
         "asset": asset,
         "stance": stance or "watch",
@@ -92,3 +94,37 @@ def _normalize_ts(value: str) -> str:
 def _fallback_summary(text: str) -> str:
     first = str(text or "").strip().splitlines()
     return first[0].strip()[:220] if first else ""
+
+
+def _age_label(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "unknown"
+    try:
+        ts = datetime.fromisoformat(raw)
+    except ValueError:
+        return "unknown"
+    age_hours = max(0.0, (datetime.now() - ts).total_seconds() / 3600.0)
+    if age_hours < 6:
+        return "<6h"
+    if age_hours < 24:
+        return "<24h"
+    if age_hours < 72:
+        return "<72h"
+    return "72h+"
+
+
+def _status_for_decision(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "unknown"
+    try:
+        ts = datetime.fromisoformat(raw)
+    except ValueError:
+        return "unknown"
+    age_hours = max(0.0, (datetime.now() - ts).total_seconds() / 3600.0)
+    if age_hours < 72:
+        return "beklemede"
+    if age_hours < 168:
+        return "izlenmeli"
+    return "arsiv"
