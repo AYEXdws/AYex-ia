@@ -24,10 +24,21 @@ logger = get_logger(__name__)
 _NO_DATA_MARKERS = (
     "veri yok",
     "canli veri yok",
+    "canlı veri yok",
     "gercek zamanli",
+    "gerçek zamanlı",
     "feed yok",
+    "bagli degil",
+    "bağlı değil",
     "erisimim yok",
     "erişimim yok",
+    "guncel degil",
+    "güncel değil",
+    "statik",
+    "real-time degil",
+    "real time degil",
+    "altyapisi henuz tam islemiyor",
+    "altyapısı henüz tam işlemiyor",
     "net fiyat su an elimde yok",
     "elimde hisse piyasasina dair guncel veri yok",
     "elimde gercek zamanli",
@@ -216,6 +227,28 @@ def _should_force_grounded_reply(reply: str) -> bool:
     return any(marker in low for marker in _NO_DATA_MARKERS)
 
 
+def _is_live_data_query(text: str) -> bool:
+    low = _normalize_reply(text)
+    markers = (
+        "su an elinde",
+        "şu an elinde",
+        "elindeki canli veriler",
+        "elindeki canlı veriler",
+        "hangi canli veriler",
+        "hangi canlı veriler",
+        "guncel veriler neler",
+        "güncel veriler neler",
+        "canli veriler neler",
+        "canlı veriler neler",
+        "hangi feedler",
+        "hangi feed'ler",
+        "hangi veriler var",
+        "neler goruyorsun",
+        "neler görüyorsun",
+    )
+    return any(marker in low for marker in markers)
+
+
 def _event_reference_tokens(key_events: list[dict[str, Any]]) -> set[str]:
     stop = {
         "ahmet",
@@ -368,11 +401,13 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         )
 
     session = services.chat_store.ensure_session(payload.session_id, title_hint=text)
-    dedup = services.chat_store.recent_assistant_for_duplicate(
-        session.id,
-        user_text=text,
-        max_age_sec=services.settings.model_cache_ttl_sec,
-    )
+    dedup = None
+    if not _is_live_data_query(text):
+        dedup = services.chat_store.recent_assistant_for_duplicate(
+            session.id,
+            user_text=text,
+            max_age_sec=services.settings.model_cache_ttl_sec,
+        )
     if dedup is not None:
         reply = str(dedup.get("text") or "").strip() or "Model yaniti alinamadi. Lutfen tekrar dene."
         prev_metrics = dedup.get("metrics") or {}

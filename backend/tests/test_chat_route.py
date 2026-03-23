@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
-from backend.src.routes.chat import _enforce_grounded_intel_reply, _format_all_events, chat
+from backend.src.routes.chat import _enforce_grounded_intel_reply, _format_all_events, _is_live_data_query, chat
 from backend.src.schemas import ChatRequest
 
 
@@ -31,8 +31,10 @@ class _FakeSession:
 
 
 class _FakeChatStore:
-    def __init__(self):
+    def __init__(self, duplicate_response=None):
         self.appended: list[tuple[str, str, str]] = []
+        self.duplicate_response = duplicate_response
+        self.duplicate_calls = 0
 
     def ensure_session(self, session_id, title_hint=None):
         _ = title_hint
@@ -40,7 +42,8 @@ class _FakeChatStore:
 
     def recent_assistant_for_duplicate(self, session_id, user_text, max_age_sec):
         _ = (session_id, user_text, max_age_sec)
-        return None
+        self.duplicate_calls += 1
+        return self.duplicate_response
 
     def append_message(self, session_id, role, text, source="", latency_ms=None, metrics=None):
         _ = (latency_ms, metrics)
@@ -109,9 +112,9 @@ class _FakeModel:
 
 
 class _FakeServices:
-    def __init__(self, guard_ok=True, guard_reason="", model_text="Merhaba Ahmet, guncel verilere baktim."):
+    def __init__(self, guard_ok=True, guard_reason="", model_text="Merhaba Ahmet, guncel verilere baktim.", duplicate_response=None):
         self.cost_guard = _FakeCostGuard(ok=guard_ok, reason=guard_reason)
-        self.chat_store = _FakeChatStore()
+        self.chat_store = _FakeChatStore(duplicate_response=duplicate_response)
         self.settings = SimpleNamespace(model_cache_ttl_sec=45, model_context_turns=6)
         ev = SimpleNamespace(
             title="BTC 68k",
@@ -232,3 +235,23 @@ def test_enforce_grounded_intel_reply_replaces_unanchored_generic_reply_when_mat
 
     assert "USD/TRY" in out
     assert "XAU/USD" in out
+
+
+def test_is_live_data_query_detects_live_feed_questions():
+    assert _is_live_data_query("şuan elinde ki canlı veriler nelerdir")
+    assert _is_live_data_query("hangi feed'ler aktif")
+    assert not _is_live_data_query("sol mu asml mi daha iyi")
+
+
+def test_chat_skips_duplicate_cache_for_live_data_queries():
+    services = _FakeServices(
+        model_text="Ahmet, elimde guncel veri var. BTC 68k ve ASML guclu.",
+        duplicate_response={"text": "Elimde canli veri yok.", "metrics": {"ok": True}},
+    )
+    payload = ChatRequest(text="şuan elinde ki canlı veriler nelerdir")
+
+    out = asyncio.run(chat(payload, _FakeRequest(), services=services))
+
+    assert services.chat_store.duplicate_calls == 0
+    assert services.model.calls == 1
+    assert "canli veri yok" not in out.reply.lower()
