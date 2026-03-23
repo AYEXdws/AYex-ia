@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Request
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ActionRequest, ActionResponse
 from backend.src.services.container import BackendServices
-from backend.src.services.market_decision import build_market_decision
+from backend.src.services.market_decision import build_decision_prompt_block, build_market_decision, enforce_decision_reply
 from backend.src.services.proactive_briefing import build_proactive_briefing
 from backend.src.services.query_context import build_explainability_trace, build_query_context, collect_tool_evidence
 from backend.src.utils.logging import get_logger
@@ -127,6 +127,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             user_id=user_id,
         )
 
+    decision_block = build_decision_prompt_block(decision)
     combined_profile_context = "\n\n".join(
         [
             part
@@ -134,7 +135,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
                 f"Yanit politikasi:\n{query_ctx.response_policy}",
                 query_ctx.profile_context,
                 f"Proaktif brief:\n{proactive_brief.get('summary')}" if proactive_brief.get("summary") else "",
-                f"Karar notu:\n{decision.get('summary')}" if decision.get("active") else "",
+                f"Karar notu:\n{decision_block}" if decision.get("active") else "",
                 f"Sorguya ilgili intel:\n{query_ctx.intel_context_text}" if query_ctx.intel_context_text else "",
             )
             if str(part or "").strip()
@@ -142,7 +143,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
     )
     model_input = text
     if decision.get("active"):
-        model_input = f"Kullanici istegi: {text}\n\nKarar notu:\n{decision.get('summary')}"
+        model_input = f"Kullanici istegi: {text}\n\nKarar notu:\n{decision_block}"
     if tool_context:
         model_input = f"{model_input}\n\nTool kaniti:\n{tool_context}"
 
@@ -169,6 +170,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
         )
 
     reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
+    reply = enforce_decision_reply(decision=decision, reply=reply)
     explainability = build_explainability_trace(
         query_ctx=query_ctx,
         proactive_brief=proactive_brief,

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
-from backend.src.services.market_decision import build_market_decision
+from backend.src.services.market_decision import build_decision_prompt_block, build_market_decision, enforce_decision_reply
 from backend.src.services.model_router import ModelSelection, select_model
 from backend.src.services.proactive_briefing import build_proactive_briefing
 from backend.src.services.query_context import build_explainability_trace, build_query_context, collect_tool_evidence
@@ -341,8 +341,9 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
     result = None
     reply = ""
     model_input = text
+    decision_block = build_decision_prompt_block(decision)
     if decision.get("active"):
-        model_input = f"Kullanici istegi: {text}\n\nKarar notu:\n{decision.get('summary')}"
+        model_input = f"Kullanici istegi: {text}\n\nKarar notu:\n{decision_block}"
     if tool_evidence.text:
         model_input = f"{model_input}\n\nCanli arac kaniti:\n{tool_evidence.text}"
 
@@ -353,7 +354,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
                 f"Yanit politikasi:\n{query_ctx.response_policy}",
                 query_ctx.profile_context,
                 f"Proaktif brief:\n{proactive_brief.get('summary')}" if proactive_brief.get("summary") else "",
-                f"Karar notu:\n{decision.get('summary')}" if decision.get("active") else "",
+                f"Karar notu:\n{decision_block}" if decision.get("active") else "",
                 f"Sorguya ilgili intel:\n{query_ctx.intel_context_text}" if query_ctx.intel_context_text else "",
             )
             if str(part or "").strip()
@@ -429,6 +430,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
 
     if not reply or len(reply) < 10:
         reply = "Bir sorun olustu, tekrar dene."
+    reply = enforce_decision_reply(decision=decision, reply=reply)
 
     latency_ms = int(getattr(result, "latency_ms", 0) or 0)
     source = str(getattr(result, "source", "") or "openai_direct")
