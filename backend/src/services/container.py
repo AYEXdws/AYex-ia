@@ -89,7 +89,12 @@ def build_services() -> BackendServices:
     agent_mode = AgentModeService(model_service=model_service, tools=tools)
     intel_archive = IntelArchive(data_dir=Path(settings.data_dir))
     intel_store = IntelStore(persist_path=Path(settings.data_dir) / "intel_events.json", archive=intel_archive)
-    intel = IntelService(intel_store, openai_client=model_service.openai, profile_loader=profile.load)
+    intel = IntelService(
+        intel_store,
+        openai_client=model_service.openai,
+        profile_loader=profile.load,
+        fast_model=settings.ayex_fast_model,
+    )
     cost_guard = CostGuardService(settings)
     orchestrator = ResponseOrchestrator(
         stt_service=stt,

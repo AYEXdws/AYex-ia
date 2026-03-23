@@ -42,7 +42,7 @@ def test_model_service_sets_temperature_for_non_gpt5(tmp_path):
     recorder = _Recorder()
     service.openai = recorder  # type: ignore[assignment]
 
-    result = service.run_action(text="merhaba", model="gpt-4o-mini", route_name="test")
+    result = service.run_action(text="merhaba", model="gpt-4o", route_name="test")
 
     assert result.ok is True
     assert recorder.last_kwargs is not None

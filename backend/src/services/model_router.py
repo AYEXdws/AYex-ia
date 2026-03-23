@@ -181,10 +181,10 @@ class RoutingFeatures:
 def select_model(
     text: str,
     *,
-    chat_model: str = "claude-haiku-4.5",
-    reasoning_model: str = "claude-sonnet-4.6",
-    power_model: str = "gpt-5",
-    fast_model: str = "gpt-4o-mini",
+    chat_model: str = "claude-haiku-4-5-20251001",
+    reasoning_model: str = "claude-sonnet-4-6",
+    power_model: str = "gpt-4.1",
+    fast_model: str = "gpt-4o",
     force_route: str | None = None,
     intel_event_count: int = 0,
     conversation_turn_count: int = 0,
@@ -329,7 +329,7 @@ def select_model(
     )
 
 
-def select_fast_model(fast_model: str = "gpt-4o-mini") -> ModelSelection:
+def select_fast_model(fast_model: str = "gpt-4o") -> ModelSelection:
     """Select fast model for background tasks (memory, tools)."""
     return ModelSelection(
         model=fast_model,

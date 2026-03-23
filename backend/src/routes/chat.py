@@ -182,10 +182,10 @@ def _select_model_simple(
     """Sistematik model secimi (4 model)."""
     return select_model(
         text=text,
-        chat_model=getattr(settings, "ayex_chat_model", "claude-haiku-4.5"),
-        reasoning_model=getattr(settings, "ayex_reasoning_model", "claude-sonnet-4.6"),
-        power_model=getattr(settings, "ayex_power_model", "gpt-5"),
-        fast_model=getattr(settings, "ayex_fast_model", "gpt-4o-mini"),
+        chat_model=getattr(settings, "ayex_chat_model", "claude-haiku-4-5-20251001"),
+        reasoning_model=getattr(settings, "ayex_reasoning_model", "claude-sonnet-4-6"),
+        power_model=getattr(settings, "ayex_power_model", "gpt-4.1"),
+        fast_model=getattr(settings, "ayex_fast_model", "gpt-4o"),
         intel_event_count=max(0, int(event_count or 0)),
         conversation_turn_count=max(0, int(conversation_turn_count or 0)),
         allow_anthropic=allow_anthropic,

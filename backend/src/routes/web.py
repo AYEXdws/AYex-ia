@@ -976,5 +976,5 @@ def web_chat() -> str:
   </script>
 </body>
 </html>"""
-    expected_model = (os.environ.get("AYEX_CHAT_MODEL") or os.environ.get("AYEX_MODEL") or "claude-haiku-4.5").strip()
+    expected_model = (os.environ.get("AYEX_CHAT_MODEL") or os.environ.get("AYEX_MODEL") or "claude-haiku-4-5-20251001").strip()
     return html.replace("__EXPECTED_MODEL__", expected_model).replace("__EXPECTED_MODEL__", expected_model)

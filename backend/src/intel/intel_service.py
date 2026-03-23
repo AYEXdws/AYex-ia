@@ -449,10 +449,17 @@ def _is_noise_event(event: IntelEvent) -> bool:
 
 
 class IntelService:
-    def __init__(self, store: IntelStore, openai_client=None, profile_loader: Callable[[], dict] | None = None):
+    def __init__(
+        self,
+        store: IntelStore,
+        openai_client=None,
+        profile_loader: Callable[[], dict] | None = None,
+        fast_model: str = "gpt-4o",
+    ):
         self.store = store
         self.openai_client = openai_client
         self.profile_loader = profile_loader
+        self.fast_model = (fast_model or "gpt-4o").strip()
 
     def get_latest_events(self, limit: int = 10) -> list[IntelEvent]:
         return self.store.get_latest_events(limit=limit)
@@ -609,7 +616,7 @@ class IntelService:
     def analyze_event(self, event: IntelEvent) -> dict:
         if self.openai_client is None:
             return self._fallback_analysis(event, reason="openai_client_missing")
-        logger.info("MODEL_SELECTED model=%s mode=%s reason=%s", "gpt-4o-mini", "intel_analysis", "event_analysis")
+        logger.info("MODEL_SELECTED model=%s mode=%s reason=%s", self.fast_model, "intel_analysis", "event_analysis")
         prompt = (
             "Analyze this event:\n"
             "- Why is it important?\n"
@@ -627,7 +634,7 @@ class IntelService:
         try:
             res = self.openai_client.call_responses(
                 prompt=prompt,
-                model="gpt-4o-mini",
+                model=self.fast_model,
                 instructions=(
                     "Keep output concise. action must be either 'monitor' or 'ignore'. "
                     "Return only valid JSON."
@@ -773,7 +780,7 @@ class IntelService:
             return "No high-priority intelligence insights for today."
         if self.openai_client is None:
             return self._fallback_daily_brief(insights, reason="openai_client_missing")
-        logger.info("MODEL_SELECTED model=%s mode=%s reason=%s", "gpt-4o-mini", "intel_brief", "daily_brief_summary")
+        logger.info("MODEL_SELECTED model=%s mode=%s reason=%s", self.fast_model, "intel_brief", "daily_brief_summary")
         prompt = (
             "Summarize the most important global events into a short intelligence brief.\n\n"
             f"Insights: {json.dumps(insights[:3], ensure_ascii=False)}"
@@ -781,7 +788,7 @@ class IntelService:
         try:
             res = self.openai_client.call_responses(
                 prompt=prompt,
-                model="gpt-4o-mini",
+                model=self.fast_model,
                 instructions="Sharp analytical tone, no fluff, keep it under 120 tokens.",
                 max_output_tokens=120,
                 route_name="intel_daily_brief",

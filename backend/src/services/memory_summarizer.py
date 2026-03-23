@@ -21,6 +21,7 @@ class MemorySummarizer:
     """
 
     def __init__(self, settings: BackendSettings):
+        self.settings = settings
         self.path = Path(settings.data_dir).expanduser().resolve() / "memory_summaries.json"
         self.pending_path = Path(settings.data_dir).expanduser().resolve() / "memory_summary_retry.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -270,9 +271,10 @@ class MemorySummarizer:
             "Sadece düz metin özet döndür."
         )
         try:
+            fast_model = (self.settings.ayex_fast_model or "gpt-4o").strip()
             res = openai_client.call_responses(
                 prompt=prompt,
-                model="gpt-4o-mini",
+                model=fast_model,
                 instructions="Kısa, net, Türkçe bir özet üret. 150 kelimeyi geçme.",
                 max_output_tokens=220,
                 route_name="memory_summarizer",

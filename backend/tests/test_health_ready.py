@@ -23,10 +23,10 @@ class _FakeCostGuard:
 class _FakeServices:
     def __init__(self):
         self.settings = SimpleNamespace(
-            ayex_chat_model="claude-haiku-4.5",
-            ayex_reasoning_model="claude-sonnet-4.6",
-            ayex_power_model="gpt-5",
-            ayex_fast_model="gpt-4o-mini",
+            ayex_chat_model="claude-haiku-4-5-20251001",
+            ayex_reasoning_model="claude-sonnet-4-6",
+            ayex_power_model="gpt-4.1",
+            ayex_fast_model="gpt-4o",
         )
         self.intel = SimpleNamespace(store=_FakeIntelStore())
         self.memory = _FakeMemory()

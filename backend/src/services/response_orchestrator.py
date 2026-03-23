@@ -77,15 +77,17 @@ class ResponseOrchestrator:
             model=model or selected_model,
             route_name="audio_turn",
         )
-        if not result.ok and (model or selected_model) != "gpt-4o-mini":
+        fallback_model = (self.model_service.settings.ayex_fast_model or "gpt-4o").strip()
+        if not result.ok and (model or selected_model) != fallback_model:
             logger.warning(
-                "MODEL_FALLBACK_TRIGGER from_model=%s to_model=gpt-4o-mini reason=primary_failed",
+                "MODEL_FALLBACK_TRIGGER from_model=%s to_model=%s reason=primary_failed",
                 model or selected_model,
+                fallback_model,
             )
             result = self.model_service.run_action(
                 transcript,
                 workspace=workspace,
-                model="gpt-4o-mini",
+                model=fallback_model,
                 route_name="audio_turn_fallback",
             )
 
