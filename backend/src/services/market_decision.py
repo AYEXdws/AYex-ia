@@ -328,10 +328,11 @@ def enforce_decision_reply(*, decision: dict[str, Any] | None, reply: str, stric
         return "\n".join(base_lines)
 
     if strict:
-        cleaned = _strip_redundant_decision_text(text=text, headline=headline)
-        if _normalize(cleaned).startswith(normalized_headline):
-            cleaned = ""
-        return "\n".join(base_lines + ([cleaned] if len(cleaned) > 24 else []))
+        evidence = [str(item).strip() for item in (row.get("evidence") or []) if str(item).strip()]
+        strict_lines = list(base_lines)
+        if evidence:
+            strict_lines.append("Kanit: " + evidence[0])
+        return "\n".join(strict_lines)
 
     if _normalize(text).startswith(normalized_headline):
         return text

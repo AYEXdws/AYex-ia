@@ -172,7 +172,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
         )
 
     reply = result.text if result.text else "Model yaniti alinamadi. Lutfen tekrar dene."
-    reply = enforce_decision_reply(decision=decision, reply=reply)
+    reply = enforce_decision_reply(decision=decision, reply=reply, strict=query_ctx.response_mode == "decision")
     explainability = build_explainability_trace(
         query_ctx=query_ctx,
         proactive_brief=proactive_brief,

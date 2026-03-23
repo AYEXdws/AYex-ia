@@ -53,6 +53,39 @@ _LOW_SIGNAL_WORLD_MARKERS = (
     "showbiz",
     "entertainment",
     "influencer",
+    "dies at",
+    "actor",
+    "actress",
+    "singer",
+    "music star",
+    "tv star",
+    "reality show",
+    "billionaire owner",
+)
+_HIGH_SIGNAL_WORLD_MARKERS = (
+    "war",
+    "conflict",
+    "missile",
+    "ballistic",
+    "election",
+    "president",
+    "prime minister",
+    "government",
+    "parliament",
+    "minister",
+    "trade",
+    "tariff",
+    "sanction",
+    "oil",
+    "gas",
+    "energy",
+    "blackout",
+    "power grid",
+    "attack",
+    "troops",
+    "invasion",
+    "nuclear",
+    "ceasefire",
 )
 
 
@@ -268,8 +301,11 @@ def _is_low_signal_world_event(*, source: str, title: str, summary: str, importa
     if category in {"security", "economy"}:
         return False
     blob = _normalize_text(" ".join([title, summary]))
-    if any(marker in blob for marker in _LOW_SIGNAL_WORLD_MARKERS):
+    has_strategic_signal = any(_contains_keyword(blob, marker) for marker in _HIGH_SIGNAL_WORLD_MARKERS)
+    if category == "global" and importance < 7 and not has_strategic_signal:
         return True
+    if any(marker in blob for marker in _LOW_SIGNAL_WORLD_MARKERS):
+        return not has_strategic_signal
     return False
 
 

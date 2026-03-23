@@ -65,6 +65,16 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
   }, [selectedSessionId, token, onInsight]);
 
   const canSend = useMemo(() => text.trim().length > 0 && !typing, [text, typing]);
+  const promptPresets = [
+    'şuan elinde ki canlı veriler nelerdir',
+    '1 ay icin hangi coin daha mantikli',
+    '1 ay icin hangi hisse daha mantikli',
+    'guncel makro tarafta en onemli tablo ne',
+  ];
+
+  function applyPreset(value) {
+    setText(value);
+  }
 
   async function sendMessage(e) {
     e.preventDefault();
@@ -159,6 +169,22 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
         <div className="rounded-2xl border border-[var(--line)] bg-black/10 px-3 py-2.5">Baglamli cevap</div>
         <div className="rounded-2xl border border-[var(--line)] bg-black/10 px-3 py-2.5">Hafiza destekli akış</div>
         <div className="rounded-2xl border border-[var(--line)] bg-black/10 px-3 py-2.5">Canli veri ile karar</div>
+      </div>
+
+      <div className="mb-4 rounded-[22px] border border-[var(--line)] bg-black/10 px-3 py-3">
+        <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">Calisma Masasi</div>
+        <div className="flex flex-wrap gap-2">
+          {promptPresets.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => applyPreset(preset)}
+              className="rounded-full border border-[var(--line)] bg-white/[0.03] px-3 py-2 text-xs text-[var(--muted)] transition-colors hover:border-[var(--line-strong)] hover:text-[var(--text)]"
+            >
+              {preset}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="scroll-thin flex-1 space-y-3 overflow-y-auto pr-1">

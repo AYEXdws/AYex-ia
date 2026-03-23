@@ -37,14 +37,16 @@ function TraceBlock({ trace }) {
   const intel = Array.isArray(trace?.intel) ? trace.intel : [];
   const briefing = trace?.briefing || '';
   const decision = trace?.decision || '';
+  const responseMode = trace?.response_mode || '';
 
-  if (!reasons.length && !risks.length && !memory.length && !intel.length && !briefing && !decision) {
+  if (!reasons.length && !risks.length && !memory.length && !intel.length && !briefing && !decision && !responseMode) {
     return null;
   }
 
   return (
     <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-black/10 px-3 py-3">
       <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">neden boyle cevap verdi</div>
+      {responseMode ? <TraceLine label="Mod" value={responseMode} /> : null}
       {decision ? <TraceLine label="Karar" value={decision} /> : null}
       {briefing ? <TraceLine label="Brief" value={briefing} /> : null}
       {reasons.length ? <TraceList label="Gerekce" items={reasons} /> : null}

@@ -218,7 +218,9 @@ def test_enforce_decision_reply_strips_repeated_headline_from_model_text():
     )
 
     assert out.count("Ahmet, su an en mantikli secenek SOL.") == 1
-    assert "SOL 1 aylik pencerede daha guclu momentum tasiyor." in out
+    assert "SOL 1 aylik pencerede daha guclu momentum tasiyor." not in out
+    assert "Neden:" in out
+    assert "Risk:" in out
 
 
 def test_proactive_briefing_returns_compare_and_priorities():

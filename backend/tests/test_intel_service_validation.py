@@ -95,6 +95,21 @@ def test_validate_event_payload_rejects_low_signal_world_news():
         service.validate_event_payload(payload)
 
 
+def test_validate_event_payload_rejects_low_importance_human_interest_world_news_without_strategic_signal():
+    service = _service()
+    payload = {
+        "title": "Local TV star draws huge crowds after comeback show",
+        "summary": "Fans gather in city center as entertainment buzz grows after the celebrity return.",
+        "category": "global",
+        "importance": 6,
+        "source": "reuters",
+        "tags": ["world"],
+    }
+
+    with pytest.raises(ValueError, match="low_signal_event"):
+        service.validate_event_payload(payload)
+
+
 def test_validate_event_payload_does_not_misclassify_claims_as_ai():
     service = _service()
     payload = {
