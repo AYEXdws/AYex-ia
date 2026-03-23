@@ -232,7 +232,12 @@ def _maybe_trigger_memory_summary(services: BackendServices, session_id: str) ->
 
 async def _async_memory_summary(services: BackendServices, session_id: str) -> None:
     """Async memory summary."""
+    messages: list[dict[str, Any]] = []
     try:
+        retried = services.memory.process_retry_queue(openai_client=services.model.openai, max_items=2)
+        if retried:
+            logger.info("MEMORY_SUMMARY_RETRY_PROCESSED count=%s", retried)
+
         messages = services.chat_store.messages(session_id, limit=80)
         if messages:
             services.memory.summarize_and_store(
@@ -241,6 +246,10 @@ async def _async_memory_summary(services: BackendServices, session_id: str) -> N
                 openai_client=services.model.openai,
             )
     except Exception as exc:
+        try:
+            services.memory.queue_retry(session_id=session_id, messages=messages, reason=str(exc))
+        except Exception:
+            pass
         logger.warning("MEMORY_SUMMARY_FAILED error=%s", str(exc))
 
 

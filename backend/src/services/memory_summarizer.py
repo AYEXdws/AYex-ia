@@ -22,9 +22,12 @@ class MemorySummarizer:
 
     def __init__(self, settings: BackendSettings):
         self.path = Path(settings.data_dir).expanduser().resolve() / "memory_summaries.json"
+        self.pending_path = Path(settings.data_dir).expanduser().resolve() / "memory_summary_retry.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
             self.path.write_text("[]", encoding="utf-8")
+        if not self.pending_path.exists():
+            self.pending_path.write_text("[]", encoding="utf-8")
         self._lock = threading.Lock()
 
     def summarize_and_store(self, messages: list, session_id: str, openai_client) -> dict:
@@ -42,26 +45,127 @@ class MemorySummarizer:
         if not summary_text:
             summary_text = self._fallback_summary(rows)
 
-        keywords = self._extract_keywords(f"{summary_text}\n{transcript}", limit=6)
-        topic = self._detect_topic(summary_text, keywords)
+        return self._store_entry(
+            summary_text=summary_text,
+            transcript=transcript,
+            session_id=session_id,
+            fingerprint=fingerprint,
+        )
+
+    def queue_retry(self, *, session_id: str, messages: list, reason: str = "") -> bool:
+        transcript = self._build_transcript(list(messages or []), max_messages=18)
+        if not transcript.strip():
+            return False
+        fingerprint = hashlib.sha256(f"{session_id}|{transcript}".encode("utf-8")).hexdigest()[:16]
         now = datetime.utcnow()
-        entry = {
+        queued = {
             "id": uuid4().hex,
-            "date": now.date().isoformat(),
-            "timestamp": now.isoformat(),
-            "summary": summary_text[:900],
-            "keywords": keywords,
-            "topic": topic,
             "session_id": str(session_id or ""),
             "fingerprint": fingerprint,
+            "transcript": transcript[:7000],
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+            "next_retry_at": now.isoformat(),
+            "attempts": 0,
+            "last_error": str(reason or "")[:260],
         }
+        with self._lock:
+            pending = self._load_pending()
+            if any(str(item.get("fingerprint") or "") == fingerprint for item in pending):
+                return False
+            if any(str(item.get("fingerprint") or "") == fingerprint for item in self._load()):
+                return False
+            pending.append(queued)
+            pending.sort(key=lambda x: str(x.get("next_retry_at") or ""), reverse=False)
+            self._save_pending(pending)
+        logger.info("MEMORY_SUMMARY_RETRY_QUEUED session_id=%s fingerprint=%s", session_id, fingerprint)
+        return True
+
+    def process_retry_queue(self, openai_client, max_items: int = 2) -> int:
+        safe_max = max(1, min(10, int(max_items or 2)))
+        now = datetime.utcnow()
+        processed = 0
+        to_process: list[dict] = []
 
         with self._lock:
-            data = self._load()
-            data.append(entry)
-            data.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
-            self._save(data)
-        return entry
+            pending = self._load_pending()
+            remain: list[dict] = []
+            for item in pending:
+                if processed >= safe_max:
+                    remain.append(item)
+                    continue
+                next_retry = self._parse_ts(str(item.get("next_retry_at") or ""))
+                if next_retry is None or next_retry <= now:
+                    to_process.append(dict(item))
+                    processed += 1
+                    continue
+                remain.append(item)
+            self._save_pending(remain)
+
+        successful = 0
+        retriable: list[dict] = []
+        for item in to_process:
+            transcript = str(item.get("transcript") or "").strip()
+            if not transcript:
+                continue
+            session_id = str(item.get("session_id") or "")
+            fingerprint = str(item.get("fingerprint") or "")
+            attempts = int(item.get("attempts") or 0)
+            try:
+                summary_text = self._summarize_with_model(transcript, openai_client=openai_client)
+                if not summary_text:
+                    raise RuntimeError("empty_model_summary")
+                stored = self._store_entry(
+                    summary_text=summary_text,
+                    transcript=transcript,
+                    session_id=session_id,
+                    fingerprint=fingerprint,
+                )
+                if stored:
+                    successful += 1
+                    logger.info(
+                        "MEMORY_SUMMARY_RETRY_SUCCESS session_id=%s fingerprint=%s attempts=%s",
+                        session_id,
+                        fingerprint,
+                        attempts + 1,
+                    )
+                    continue
+                # Already stored/duplicate: consider queue resolved.
+                successful += 1
+            except Exception as exc:
+                next_attempt = attempts + 1
+                if next_attempt >= 5:
+                    logger.info(
+                        "MEMORY_SUMMARY_RETRY_DROPPED session_id=%s fingerprint=%s attempts=%s error=%s",
+                        session_id,
+                        fingerprint,
+                        next_attempt,
+                        exc,
+                    )
+                    continue
+                backoff_minutes = min(60, 2 ** max(0, next_attempt - 1))
+                retry_at = datetime.utcnow() + timedelta(minutes=backoff_minutes)
+                item["attempts"] = next_attempt
+                item["updated_at"] = datetime.utcnow().isoformat()
+                item["next_retry_at"] = retry_at.isoformat()
+                item["last_error"] = str(exc)[:260]
+                retriable.append(item)
+                logger.info(
+                    "MEMORY_SUMMARY_RETRY_FAIL session_id=%s fingerprint=%s attempts=%s next_retry_min=%s error=%s",
+                    session_id,
+                    fingerprint,
+                    next_attempt,
+                    backoff_minutes,
+                    exc,
+                )
+
+        if retriable:
+            with self._lock:
+                pending = self._load_pending()
+                pending.extend(retriable)
+                pending.sort(key=lambda x: str(x.get("next_retry_at") or ""), reverse=False)
+                self._save_pending(pending)
+        return successful
 
     def search_memories(self, query: str, limit: int = 5) -> list:
         q_tokens = self._extract_keywords(query, limit=10)
@@ -124,6 +228,33 @@ class MemorySummarizer:
         if len(lines) == 1:
             return ""
         return "\n".join(lines)
+
+    def _store_entry(self, *, summary_text: str, transcript: str, session_id: str, fingerprint: str) -> dict:
+        summary = str(summary_text or "").strip()
+        if not summary:
+            return {}
+
+        with self._lock:
+            existing = self._load()
+            if any(str(item.get("fingerprint") or "") == fingerprint for item in existing):
+                return {}
+            keywords = self._extract_keywords(f"{summary}\n{transcript}", limit=6)
+            topic = self._detect_topic(summary, keywords)
+            now = datetime.utcnow()
+            entry = {
+                "id": uuid4().hex,
+                "date": now.date().isoformat(),
+                "timestamp": now.isoformat(),
+                "summary": summary[:900],
+                "keywords": keywords,
+                "topic": topic,
+                "session_id": str(session_id or ""),
+                "fingerprint": fingerprint,
+            }
+            existing.append(entry)
+            existing.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
+            self._save(existing)
+            return entry
 
     def _summarize_with_model(self, transcript: str, openai_client) -> str:
         if openai_client is None:
@@ -234,3 +365,15 @@ class MemorySummarizer:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.path)
+
+    def _load_pending(self) -> list[dict]:
+        try:
+            data = json.loads(self.pending_path.read_text(encoding="utf-8"))
+        except Exception:
+            data = []
+        return data if isinstance(data, list) else []
+
+    def _save_pending(self, rows: list[dict]) -> None:
+        tmp = self.pending_path.with_suffix(self.pending_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(self.pending_path)
