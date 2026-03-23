@@ -32,6 +32,25 @@ _CATEGORY_ALIAS = {
     "geopolitic": "global",
     "other": "other",
 }
+_SOURCE_CATEGORY_HINTS = {
+    "bbc_world": "global",
+    "reuters": "global",
+    "the_hacker_news": "security",
+    "coingecko": "economy",
+    "yahoo_finance": "economy",
+    "er_api": "economy",
+}
+_GENERIC_TAGS = {"dunya", "haber", "gundem", "news", "world", "update", "breaking"}
+_LOW_SIGNAL_WORLD_MARKERS = (
+    "k-pop",
+    "comeback show",
+    "onlyfans",
+    "pornographic content",
+    "celebrity",
+    "showbiz",
+    "entertainment",
+    "influencer",
+)
 
 
 def _clean_text(value: str) -> str:
@@ -137,6 +156,89 @@ def _topic_keywords() -> dict[str, tuple[str, ...]]:
         "company": ("company", "sirket", "earnings", "bilanco", "ceo", "kurumsal", "corporate"),
         "tech": ("tech", "teknoloji", "ai", "outage", "cloud", "infrastructure", "altyapi", "chip", "semiconductor"),
     }
+
+
+def _category_keywords() -> dict[str, tuple[str, ...]]:
+    topics = _topic_keywords()
+    return {
+        "economy": topics["economy"] + topics["market"] + topics["crypto"],
+        "security": topics["security"] + ("cve", "exploit", "malware", "rce", "vulnerability", "oracle", "patches"),
+        "tech": topics["tech"] + ("platform", "device", "software", "app", "model", "bedrock"),
+        "global": topics["global"] + ("missile", "israel", "iran", "hezbollah", "election", "minister", "border", "blackout", "power grid", "workers", "india"),
+    }
+
+
+def _infer_event_category(*, source: str, title: str, summary: str, category: str) -> str:
+    blob = _normalize_text(" ".join([title, summary]))
+    scores: dict[str, float] = {key: 0.0 for key in _ALLOWED_CATEGORIES}
+    if category in scores:
+        scores[category] += 0.35
+    source_hint = _SOURCE_CATEGORY_HINTS.get(source)
+    if source_hint in scores:
+        scores[source_hint] += 0.45
+    for candidate, keywords in _category_keywords().items():
+        for keyword in keywords:
+            if keyword in blob:
+                scores[candidate] += 0.18
+    best = max(scores.items(), key=lambda item: item[1])[0]
+    return best if scores[best] > 0 else category
+
+
+def _derive_tags(*, source: str, title: str, summary: str, category: str, tags: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for tag in tags:
+        if not tag or tag in _GENERIC_TAGS:
+            continue
+        if tag not in cleaned:
+            cleaned.append(tag)
+
+    blob = _normalize_text(" ".join([title, summary]))
+    keyword_tags = {
+        "btc": ("btc", "bitcoin"),
+        "eth": ("eth", "ethereum"),
+        "rce": ("rce", "remote code execution"),
+        "cve": ("cve-", "cve "),
+        "war": ("war", "ground invasion", "savas"),
+        "missile": ("missile", "ballistic"),
+        "election": ("election", "vote", "poll"),
+        "energy": ("blackout", "power grid", "electricity"),
+        "trade": ("trade", "tariff", "sanction"),
+        "ai": ("ai", "model", "bedrock"),
+        "makro": ("usd/try", "eur/usd", "gbp/usd", "forex", "makro"),
+    }
+    for tag, markers in keyword_tags.items():
+        if any(marker in blob for marker in markers) and tag not in cleaned:
+            cleaned.append(tag)
+
+    if source in {"bbc_world", "reuters"} and category == "global":
+        for country_tag, markers in {
+            "israel": ("israel",),
+            "iran": ("iran",),
+            "lebanon": ("lebanon", "hezbollah"),
+            "france": ("france", "paris", "marseille"),
+            "germany": ("germany",),
+            "india": ("india",),
+            "cuba": ("cuba",),
+        }.items():
+            if any(marker in blob for marker in markers) and country_tag not in cleaned:
+                cleaned.append(country_tag)
+
+    if not cleaned and category:
+        cleaned.append(category)
+    return cleaned[:5]
+
+
+def _is_low_signal_world_event(*, source: str, title: str, summary: str, importance: int, category: str) -> bool:
+    if source not in {"bbc_world", "reuters"}:
+        return False
+    if importance >= 8:
+        return False
+    if category in {"security", "economy"}:
+        return False
+    blob = _normalize_text(" ".join([title, summary]))
+    if any(marker in blob for marker in _LOW_SIGNAL_WORLD_MARKERS):
+        return True
+    return False
 
 
 def extract_query_topics(query: str) -> dict:
@@ -405,6 +507,11 @@ class IntelService:
         source = re.sub(r"[^a-z0-9_\-.:]+", "_", source).strip("_")
         if len(source) < 2 or len(source) > 64:
             raise ValueError("source_invalid")
+
+        category = _infer_event_category(source=source, title=title, summary=summary, category=category)
+        tags = _derive_tags(source=source, title=title, summary=summary, category=category, tags=tags)
+        if _is_low_signal_world_event(source=source, title=title, summary=summary, importance=importance, category=category):
+            raise ValueError("low_signal_event")
 
         ts = _normalize_event_timestamp(payload.get("timestamp"))
 
