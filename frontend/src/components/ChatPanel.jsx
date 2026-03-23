@@ -6,8 +6,8 @@ import TypingDots from './TypingDots';
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const INITIAL_MESSAGE = {
   role: 'assistant',
-  text: 'Buradayim. Konuyu net yaz. Gerekiyorsa karar da veririm, sadece yorum yapip gecmem.',
-  meta: 'baglam acik • hafiza hazir'
+  text: 'Hazirim. Konuyu net yaz. Gerekirse karar veririm.',
+  meta: 'baglam acik • canli akis hazir'
 };
 
 export default function ChatPanel({ token, selectedSessionId, onSessionChange, onStatus, onRefreshSurface, onInsight }) {
@@ -153,15 +153,14 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
     <div className="glass-card relative flex h-full w-full flex-col overflow-hidden p-5 md:p-6">
       <div className="mb-4 flex flex-col gap-3 border-b border-[var(--line)] pb-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <div className="section-kicker">Primary Channel</div>
-          <h2 className="panel-title mt-2 text-2xl text-[var(--text)]">Ahmet ile acik kanal</h2>
+          <div className="section-kicker">Desk</div>
+          <h2 className="panel-title mt-2 text-2xl text-[var(--text)]">Konusma</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">
-            Soruyu yaz. Sistem baglami, hafizayi ve ilgili veriyi birlikte cekip sana direkt dilsiz rapor yerine net cevap
-            versin.
+            Soruyu yaz. Sistem ilgili akisi, hafizayi ve son sinyali birlikte cekip tek cevapta toplasin.
           </p>
         </div>
         <div className="rounded-full border border-[var(--line-strong)] bg-[var(--accent-soft)] px-3 py-1 text-[11px] tracking-[0.16em] text-[var(--accent-strong)]">
-          PRIVATE MODE
+          IA
         </div>
       </div>
 
@@ -172,7 +171,7 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
       </div>
 
       <div className="mb-4 rounded-[22px] border border-[var(--line)] bg-black/10 px-3 py-3">
-        <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">Calisma Masasi</div>
+        <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">Hazir Basliklar</div>
         <div className="flex flex-wrap gap-2">
           {promptPresets.map((preset) => (
             <button
@@ -211,7 +210,7 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={3}
-          placeholder="Ne dusunuyorsun, hangi karari vermemiz gerekiyor, hangi veriyi anlamlandirmam gerekiyor?"
+          placeholder="Soruyu yaz. Gerekirse karar, risk ve kanitla birlikte doner."
           className="soft-input min-h-[88px] flex-1 resize-none px-4 py-3 text-sm leading-6"
         />
         <button

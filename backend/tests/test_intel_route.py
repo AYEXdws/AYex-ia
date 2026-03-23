@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from backend.src.intel.event_model import IntelEvent
-from backend.src.routes.intel import intel_brief
+from backend.src.routes.intel import intel_brief, public_intel
 
 
 class _FakeIntel:
@@ -103,3 +103,17 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["live_inventory"]["feeds"]["cyber"]["available"] is True
     assert payload["persona_focus"]["assistant_name"] == "AYEX"
     assert payload["persona_focus"]["feedback_style"] == "sert ve net"
+
+
+def test_public_intel_exposes_curated_sections():
+    payload = public_intel(services=_FakeServices())
+
+    assert payload["brand"] == "AYEXDWS"
+    assert payload["overview"]["stats"]["active_feeds"] >= 2
+    assert len(payload["pulse"]) >= 3
+    sections = {section["key"]: section for section in payload["sections"]}
+    assert {"crypto", "equities", "macro", "world", "cyber"} <= set(sections)
+    assert sections["crypto"]["items"]
+    assert sections["equities"]["items"]
+    assert sections["macro"]["items"]
+    assert sections["cyber"]["items"]

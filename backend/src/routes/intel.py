@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Request
 
 from backend.src.intel.intel_service import select_relevant_intel_context
@@ -10,6 +12,14 @@ from backend.src.services.market_decision import build_asset_signal_board, build
 from backend.src.services.proactive_briefing import build_proactive_briefing
 
 router = APIRouter()
+
+_PUBLIC_FEED_SPECS = (
+    ("crypto", "Kripto", {"coingecko"}),
+    ("equities", "Hisse", {"yahoo_finance"}),
+    ("macro", "Makro", {"er_api"}),
+    ("world", "World", {"bbc_world", "reuters"}),
+    ("cyber", "Cyber", {"the_hacker_news"}),
+)
 
 
 @router.get("/intel")
@@ -36,6 +46,34 @@ def intel_brief(request: Request, services: BackendServices = Depends(get_servic
         "domain_focus": _build_domain_focus(inventory_events),
         "live_inventory": build_live_inventory(inventory_events),
         "persona_focus": _build_persona_focus(profile_data),
+    }
+
+
+@router.get("/public/intel")
+def public_intel(services: BackendServices = Depends(get_services)) -> dict:
+    inventory_events = _inventory_events(services)
+    latest_events = list(services.intel.get_latest_events(limit=24) or [])
+    market_focus = _build_market_focus(
+        services=services,
+        user_id="public",
+        latest_events=latest_events,
+        profile_data={},
+    )
+    domain_focus = _build_domain_focus(inventory_events)
+    live_inventory = build_live_inventory(inventory_events)
+    sections = _build_public_sections(
+        inventory_events=inventory_events,
+        market_focus=market_focus,
+        domain_focus=domain_focus,
+        live_inventory=live_inventory,
+    )
+    updated_at = _latest_timestamp_iso(inventory_events)
+    return {
+        "brand": "AYEXDWS",
+        "updated_at": updated_at,
+        "overview": _build_public_overview(sections=sections, updated_at=updated_at),
+        "pulse": _build_public_pulse(market_focus=market_focus, domain_focus=domain_focus),
+        "sections": sections,
     }
 
 
@@ -148,3 +186,114 @@ def _build_persona_focus(profile_data: dict) -> dict:
         "preferred_categories": preferred_categories[:3],
         "focus_projects": focus_projects[:3],
     }
+
+
+def _build_public_sections(*, inventory_events: list, market_focus: dict, domain_focus: dict, live_inventory: dict) -> list[dict]:
+    sections: list[dict] = []
+    for key, label, sources in _PUBLIC_FEED_SPECS:
+        matching = [
+            event
+            for event in list(inventory_events or [])
+            if str(getattr(event, "source", "") or "").strip().lower() in sources
+        ]
+        matching.sort(key=_event_sort_key, reverse=True)
+        focus = _select_public_focus(key=key, market_focus=market_focus, domain_focus=domain_focus)
+        feed_meta = dict((live_inventory.get("feeds") or {}).get(key) or {})
+        sections.append(
+            {
+                "key": key,
+                "label": label,
+                "freshness": str(feed_meta.get("freshness") or "unknown"),
+                "freshness_state": str(feed_meta.get("freshness_state") or "unknown"),
+                "count_24h": int(feed_meta.get("count_24h") or 0),
+                "summary": focus.get("summary") or feed_meta.get("summary") or f"{label} akisi icin sinyal yok.",
+                "signal": focus.get("signal") or feed_meta.get("signal") or "unknown",
+                "reasons": list(focus.get("reasons") or [])[:2],
+                "headline": str(matching[0].title).strip() if matching else f"{label} akisi icin son event yok.",
+                "items": [_event_to_public_item(event) for event in matching[:4]],
+            }
+        )
+    return sections
+
+
+def _select_public_focus(*, key: str, market_focus: dict, domain_focus: dict) -> dict:
+    if key in {"crypto", "equities", "macro"}:
+        return dict((market_focus or {}).get(key) or {})
+    if key in {"world", "cyber"}:
+        return dict((domain_focus or {}).get(key) or {})
+    return {}
+
+
+def _build_public_overview(*, sections: list[dict], updated_at: str) -> dict:
+    active_count = sum(1 for section in sections if section.get("freshness_state") in {"fresh", "watch"})
+    total_events = sum(int(section.get("count_24h") or 0) for section in sections)
+    strongest = next(
+        (section for section in sections if section.get("signal") in {"conviction", "strong", "stress", "fresh"}),
+        sections[0] if sections else {},
+    )
+    strongest_label = str((strongest or {}).get("label") or "Akis")
+    strongest_summary = str((strongest or {}).get("summary") or "").strip()
+    return {
+        "headline": "Bes akistan gelen guncel sinyaller tek yuzeyde toplanir.",
+        "summary": strongest_summary or "Canli akislardan gelen son sinyaller ayni omurgada okunur.",
+        "updated_at": updated_at,
+        "stats": {
+            "active_feeds": active_count,
+            "events_24h": total_events,
+            "lead_domain": strongest_label,
+        },
+    }
+
+
+def _build_public_pulse(*, market_focus: dict, domain_focus: dict) -> list[dict]:
+    pulse: list[dict] = []
+    for key, label in (("crypto", "Kripto"), ("equities", "Hisse"), ("macro", "Makro")):
+        row = dict((market_focus or {}).get(key) or {})
+        if not row:
+            continue
+        pulse.append(
+            {
+                "label": label,
+                "summary": str(row.get("summary") or "").strip() or f"{label} sinyali hazir.",
+                "signal": str(row.get("signal") or "watch"),
+            }
+        )
+    for key, label in (("world", "World"), ("cyber", "Cyber")):
+        row = dict((domain_focus or {}).get(key) or {})
+        pulse.append(
+            {
+                "label": label,
+                "summary": str(row.get("summary") or "").strip() or f"{label} sinyali hazir.",
+                "signal": str(row.get("signal") or "watch"),
+            }
+        )
+    return pulse[:5]
+
+
+def _event_to_public_item(event) -> dict:
+    timestamp = getattr(event, "timestamp", None)
+    return {
+        "id": str(getattr(event, "id", "") or ""),
+        "title": str(getattr(event, "title", "") or "").strip(),
+        "summary": str(getattr(event, "summary", "") or "").strip(),
+        "source": str(getattr(event, "source", "") or "").strip(),
+        "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else "",
+        "importance": int(getattr(event, "importance", 0) or 0),
+        "tags": [str(tag).strip() for tag in (getattr(event, "tags", []) or []) if str(tag).strip()][:4],
+    }
+
+
+def _event_sort_key(event) -> float:
+    timestamp = getattr(event, "timestamp", None)
+    if not isinstance(timestamp, datetime):
+        return 0.0
+    event_utc = timestamp.astimezone(timezone.utc) if timestamp.tzinfo is not None else timestamp.replace(tzinfo=timezone.utc)
+    return event_utc.timestamp()
+
+
+def _latest_timestamp_iso(events: list) -> str:
+    if not events:
+        return ""
+    latest = max(events, key=_event_sort_key)
+    timestamp = getattr(latest, "timestamp", None)
+    return timestamp.isoformat() if hasattr(timestamp, "isoformat") else ""

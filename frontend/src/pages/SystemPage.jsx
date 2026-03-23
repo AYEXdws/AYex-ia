@@ -7,7 +7,7 @@ import StatusPanel from '../components/StatusPanel';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
-export default function SystemPage() {
+export default function SystemPage({ onNavigateHome }) {
   const [token, setToken] = useState(localStorage.getItem('ayex_token') || '');
   const [status, setStatus] = useState({
     model: '-',
@@ -110,30 +110,32 @@ export default function SystemPage() {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.45 }}
     >
-      <BackgroundFX />
+      <BackgroundFX variant="desk" />
 
       <div className="relative z-10 mx-auto flex h-full w-full max-w-[1500px] flex-col gap-4 p-4 md:p-6">
         <header className="glass-card flex flex-col gap-4 px-5 py-5 md:flex-row md:items-end md:justify-between md:px-7">
           <div className="max-w-2xl">
-            <div className="section-kicker">Private Cognitive Console</div>
-            <h1 className="panel-title mt-2 text-3xl text-[var(--text)] md:text-[2.4rem]">AYEX IA</h1>
+            <div className="section-kicker">AYEX / Desk</div>
+            <h1 className="panel-title mt-2 text-3xl text-[var(--text)] md:text-[2.4rem]">Calisma Masasi</h1>
             <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">
-              Bu yuzey rapor panosu degil. Burasi AYEX&apos;in seni taniyip baglamla dusunmesi, net karar vermesi ve
-              gereksiz laf kalabaligi yapmadan sana donmesi icin acik kanal.
+              Oturumlar, canli akislar ve kararlar burada toplanir. Yayin yuzeyi ana sayfada kalir, calisma akisi
+              burada devam eder.
             </p>
           </div>
-          <div className="grid gap-2 text-sm text-[var(--muted)] md:text-right">
-            <div className="section-kicker">System Focus</div>
-            <div>Hafiza, karar ve canli veri ayni omurgada calissin.</div>
+          <div className="flex flex-wrap items-center gap-2 md:justify-end">
+            <button type="button" onClick={onNavigateHome} className="nav-pill">
+              Feed
+            </button>
+            <div className="nav-pill nav-pill-active">IA</div>
           </div>
         </header>
 
         {!token ? (
           <section className="glass-card mx-auto mt-8 w-full max-w-md p-6 md:p-7">
-            <div className="section-kicker">Secure Access</div>
-            <h2 className="panel-title mb-3 mt-2 text-2xl text-[var(--text)]">Sisteme giris</h2>
+            <div className="section-kicker">Giris</div>
+            <h2 className="panel-title mb-3 mt-2 text-2xl text-[var(--text)]">Desk erisimi</h2>
             <p className="mb-5 text-sm leading-6 text-[var(--muted)]">
-              Giris sonrasi AYEX tek oturum hafizasiyla devam eder. Hedef chat degil, gercek baglam.
+              Giris sonrasi oturumlar, canli akis ve karar katmani birlikte acilir.
             </p>
             <form onSubmit={login} className="space-y-3">
               <input
@@ -155,7 +157,7 @@ export default function SystemPage() {
                 disabled={auth.loading}
                 className="soft-button h-12 w-full rounded-2xl text-xs tracking-[0.16em]"
               >
-                {auth.loading ? 'GIRIS KONTROL EDILIYOR' : 'AYEX KANALINI AC'}
+                {auth.loading ? 'KONTROL EDILIYOR' : 'DESK AC'}
               </button>
             </form>
           </section>

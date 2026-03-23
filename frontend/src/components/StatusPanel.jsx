@@ -27,8 +27,8 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
     >
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <div className="section-kicker">System State</div>
-          <h3 className="panel-title mt-2 text-2xl text-[var(--text)]">Durum</h3>
+          <div className="section-kicker">Runtime</div>
+          <h3 className="panel-title mt-2 text-2xl text-[var(--text)]">Akis</h3>
         </div>
         <button
           onClick={onLogout}
@@ -46,18 +46,18 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
       </div>
 
       <div className="mt-8 rounded-[24px] border border-[var(--line)] bg-black/15 p-4">
-        <div className="mb-2 text-[11px] tracking-[0.18em] text-[var(--muted)]">RUNTIME</div>
+        <div className="mb-2 text-[11px] tracking-[0.18em] text-[var(--muted)]">SERVIS</div>
         <div className="flex items-center gap-2 text-sm text-[var(--text)]">
           <Dot active={ready} color={ready ? '#b48a61' : '#6c736f'} />
           {ready ? 'Hazir' : 'Baslatiliyor'}
         </div>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
-          Hedef sadece online olmak degil. Tek bir baglam omurgasi ile sana daha net ve daha kararli donmek.
+          Feed, hafiza ve karar katmani burada ayni omurgada bulusur.
         </p>
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
-        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">PROAKTIF BRIEF</div>
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">BUGUN</div>
         <p className="text-sm leading-6 text-[var(--text)]">
           {proactive?.summary || 'Guncel brief henuz yuklenmedi.'}
         </p>
@@ -73,7 +73,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
-        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">NET KARARLAR</div>
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">KARAR PANOSU</div>
         <div className="space-y-3">
           <DecisionCard
             label="Kripto"
@@ -94,7 +94,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
-        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">KISISEL MOD</div>
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">PROFIL</div>
         <DecisionCard
           label={personaFocus?.assistant_name || 'AYEX'}
           summary={`Geri bildirim tonu: ${personaFocus?.feedback_style || 'net'}. Son cevap modu: ${insight?.response_mode || status?.mode || 'normal'}.`}
@@ -112,7 +112,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
-        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">CANLI FEED ODAKLARI</div>
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">ALAN ODAKLARI</div>
         <div className="space-y-3">
           <DecisionCard
             label="World"
@@ -139,7 +139,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
-        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">SON CEVABIN GEREKCESI</div>
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">SON CEVAP IZLERI</div>
         <p className="text-sm leading-6 text-[var(--muted)]">
           {insight?.decision || insight?.briefing || 'Yeni bir cevap geldiginde neden bu yone gittigini burada goreceksin.'}
         </p>
@@ -237,7 +237,7 @@ function FeedRow({ label, row }) {
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-medium text-[var(--text)]">{label}</div>
         <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
-          {freshness} · {count}/24s
+          {freshness} · {count}/24h
         </div>
       </div>
       <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{summary}</div>

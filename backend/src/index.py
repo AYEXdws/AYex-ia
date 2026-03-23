@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 FRONTEND_INDEX = FRONTEND_DIST / "index.html"
-API_PREFIXES = ("/auth", "/chat", "/action", "/events", "/health", "/sessions", "/profile", "/usage", "/audio", "/voice", "/tts", "/event", "/intel")
+API_PREFIXES = ("/auth", "/chat", "/action", "/events", "/health", "/sessions", "/profile", "/usage", "/audio", "/voice", "/tts", "/event", "/intel", "/public")
 
 app = FastAPI(title="AYEX Backend", version="0.2.0")
 app.add_middleware(RequestMetricsMiddleware)
