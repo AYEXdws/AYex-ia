@@ -1,0 +1,307 @@
+{
+  "name": "Macro Economy Feed v1",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "macro-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://stooq.com/q/d/l/?s=xauusd&i=d",
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "id": "macro-gold",
+      "name": "Get Gold Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        112,
+        -256
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://open.er-api.com/v6/latest/USD",
+        "options": {}
+      },
+      "id": "macro-forex",
+      "name": "Get USD/TRY Rate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        160,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const forexData = $('Get USD/TRY Rate').first().json || {};\n\nfunction num(v, fallback = 0) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : fallback;\n}\n\nconst tryRate = num(forexData.rates?.TRY);\nconst eurRate = num(forexData.rates?.EUR);\nconst gbpRate = num(forexData.rates?.GBP);\n\nif (tryRate === 0) return [];\n\nconst eurTry = eurRate ? tryRate / eurRate : 0;\nconst gbpTry = gbpRate ? tryRate / gbpRate : 0;\nconst eurUsd = eurRate ? (1 / eurRate) : 0;\nconst gbpUsd = gbpRate ? (1 / gbpRate) : 0;\n\nconst title = `Makro Ozet: USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}`;\nconst summary =\n  `USD/TRY ${tryRate.toFixed(2)} seviyesinde. ` +\n  `EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}, GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}. ` +\n  `EUR/USD ${eurUsd ? eurUsd.toFixed(4) : 'N/A'}, GBP/USD ${gbpUsd ? gbpUsd.toFixed(4) : 'N/A'}. ` +\n  `Kur tarafi su an Turkiye odakli fiyatlama ve enflasyon beklentileri icin izlenmeli.`;\n\nlet importance = 6;\nif (tryRate > 35 || eurTry > 38) importance = 7;\nif (tryRate > 38 || eurTry > 41) importance = 8;\nif (tryRate > 41 || eurTry > 44) importance = 9;\n\nreturn [{\n  json: {\n    source: 'er_api',\n    source_url: 'https://open.er-api.com/v6/latest/USD',\n    source_type: 'market_api',\n    type: 'intel',\n    title,\n    summary,\n    category: 'economy',\n    importance,\n    tags: ['makro', 'usdtry', 'eurtry', 'forex', 'turkiye'],\n    why_it_matters: 'Kur tarafi enflasyon, fiyatlama davranisi ve risk istahi icin temel gostergedir.',\n    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}`,\n    possible_outcomes: [\n      'Kur yukselisi surerse fiyatlama baskisi ve enflasyon beklentisi bozulabilir',\n      'Kur sakinlesirse kisa vadeli risk algisi yumusayabilir'\n    ],\n    confidence_hint: 0.9,\n    source_quality: 'high',\n    region: 'Turkey/Global',\n    market_relevance: 'high',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "macro-build",
+      "name": "Build Macro Intel Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "mv1",
+              "leftValue": "={{$json.title}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "macro-valid",
+      "name": "Payload Valid mi",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        608,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "source",
+              "value": "={{$json.source}}",
+              "type": "string"
+            },
+            {
+              "id": "2",
+              "name": "source_url",
+              "value": "={{$json.source_url}}",
+              "type": "string"
+            },
+            {
+              "id": "3",
+              "name": "source_type",
+              "value": "={{$json.source_type}}",
+              "type": "string"
+            },
+            {
+              "id": "4",
+              "name": "type",
+              "value": "={{$json.type}}",
+              "type": "string"
+            },
+            {
+              "id": "5",
+              "name": "title",
+              "value": "={{$json.title}}",
+              "type": "string"
+            },
+            {
+              "id": "6",
+              "name": "summary",
+              "value": "={{$json.summary}}",
+              "type": "string"
+            },
+            {
+              "id": "7",
+              "name": "category",
+              "value": "={{$json.category}}",
+              "type": "string"
+            },
+            {
+              "id": "8",
+              "name": "importance",
+              "value": "={{$json.importance}}",
+              "type": "number"
+            },
+            {
+              "id": "9",
+              "name": "tags",
+              "value": "={{$json.tags}}",
+              "type": "array"
+            },
+            {
+              "id": "10",
+              "name": "why_it_matters",
+              "value": "={{$json.why_it_matters}}",
+              "type": "string"
+            },
+            {
+              "id": "11",
+              "name": "immediate_impact",
+              "value": "={{$json.immediate_impact}}",
+              "type": "string"
+            },
+            {
+              "id": "12",
+              "name": "possible_outcomes",
+              "value": "={{$json.possible_outcomes}}",
+              "type": "array"
+            },
+            {
+              "id": "13",
+              "name": "timestamp",
+              "value": "={{$json.timestamp}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "macro-clean",
+      "name": "Clean Intel Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        800,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://165.232.116.244:8000/events/ingest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-ayex-ingest-token",
+              "value": "REPLACE_WITH_INGEST_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{{ JSON.stringify({\n  type: $json.type || 'intel',\n  source: $json.source || 'n8n',\n  payload: {\n    title: $json.title,\n    summary: $json.summary,\n    category: $json.category,\n    importance: $json.importance,\n    tags: $json.tags,\n    timestamp: $json.timestamp || new Date().toISOString()\n  }\n}) }}",
+        "options": {},
+        "bodyContentType": "json",
+        "authentication": "none"
+      },
+      "id": "macro-send",
+      "name": "Send Event to AYEX",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1200,
+        -96
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get USD/TRY Rate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Gold Price": {
+      "main": [
+        []
+      ]
+    },
+    "Get USD/TRY Rate": {
+      "main": [
+        [
+          {
+            "node": "Build Macro Intel Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Macro Intel Event": {
+      "main": [
+        [
+          {
+            "node": "Payload Valid mi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payload Valid mi": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Clean Intel Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Intel Payload": {
+      "main": [
+        [
+          {
+            "node": "Send Event to AYEX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "7118de09-7300-495b-9d57-d430f69f7139",
+  "meta": {
+    "instanceId": "f9f7d571ab149b9c5f39182c051ae2dcaac33d914a5669120df9a874e1db615d"
+  },
+  "id": "05t0tn443CpFSvfj",
+  "tags": []
+}

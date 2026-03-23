@@ -1,0 +1,337 @@
+{
+  "name": "World News Feed v1",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "ff47b6c1-d9b3-46c7-89b7-c99e635d291a",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
+        "options": {}
+      },
+      "id": "0a29c94a-046a-4ca2-8566-89168a6cb569",
+      "name": "RSS Read",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!Array.isArray(items) || items.length === 0) return [];\n\nconst cleanText = (v) => String(v || '').replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\nconst lower = (v) => cleanText(v).toLowerCase();\n\nconst lowSignal = [\n  'k-pop',\n  'comeback show',\n  'onlyfans',\n  'pornographic content',\n  'celebrity',\n  'showbiz',\n  'entertainment',\n  'influencer'\n];\n\nconst tagRules = [\n  ['war', ['war', 'conflict', 'troops', 'ground invasion']],\n  ['missile', ['missile', 'ballistic']],\n  ['election', ['election', 'vote', 'poll']],\n  ['trade', ['trade', 'tariff', 'sanction']],\n  ['energy', ['energy', 'oil', 'gas', 'blackout', 'power grid']],\n  ['israel', ['israel']],\n  ['iran', ['iran']],\n  ['lebanon', ['lebanon', 'hezbollah']],\n  ['france', ['france', 'paris', 'marseille']],\n  ['germany', ['germany']],\n  ['india', ['india']],\n  ['cuba', ['cuba']]\n];\n\nconst pickCategory = (text) => {\n  const low = lower(text);\n  if (low.includes('war') || low.includes('attack') || low.includes('military') || low.includes('conflict') || low.includes('troops') || low.includes('missile') || low.includes('hezbollah') || low.includes('nuclear')) return 'global';\n  if (low.includes('election') || low.includes('president') || low.includes('prime minister') || low.includes('government') || low.includes('parliament') || low.includes('minister')) return 'global';\n  if (low.includes('economy') || low.includes('market') || low.includes('trade') || low.includes('gdp') || low.includes('inflation') || low.includes('bank') || low.includes('oil') || low.includes('energy') || low.includes('sanctions')) return 'economy';\n  if (low.includes('cyber') || low.includes('hack') || low.includes('breach')) return 'security';\n  if (low.includes('tech') || low.includes('ai') || low.includes('software')) return 'tech';\n  return 'global';\n};\n\nconst pickImportance = (text) => {\n  const low = lower(text);\n  if (low.includes('breaking') || low.includes('urgent') || low.includes('crisis') || low.includes('emergency')) return 9;\n  if (low.includes('war') || low.includes('attack') || low.includes('missile') || low.includes('nuclear') || low.includes('hezbollah')) return 8;\n  if (low.includes('election') || low.includes('president') || low.includes('prime minister') || low.includes('government')) return 7;\n  if (low.includes('economy') || low.includes('market') || low.includes('inflation') || low.includes('trade') || low.includes('sanctions')) return 7;\n  return 6;\n};\n\nconst deriveTags = (text, category) => {\n  const low = lower(text);\n  const tags = [];\n  for (const [tag, markers] of tagRules) {\n    if (markers.some((marker) => low.includes(marker)) && !tags.includes(tag)) tags.push(tag);\n  }\n  if (!tags.length) tags.push(category);\n  return tags.slice(0, 5);\n};\n\nconst rows = items\n  .map((item) => {\n    const row = item.json || {};\n    const title = cleanText(row.title);\n    const snippet = cleanText(row.contentSnippet || row.content || row.summary || '');\n    const fullText = `${title} ${snippet}`;\n    const category = pickCategory(fullText);\n    const importance = pickImportance(fullText);\n    const tags = deriveTags(fullText, category);\n    return {\n      title,\n      summary: snippet.slice(0, 600),\n      category,\n      importance,\n      tags,\n      link: row.link || 'https://bbc.com/news/world',\n      isoDate: row.isoDate || new Date().toISOString(),\n      low: lower(fullText)\n    };\n  })\n  .filter((row) => row.title && row.summary && row.summary.length >= 40)\n  .filter((row) => !lowSignal.some((marker) => row.low.includes(marker)))\n  .filter((row) => row.importance >= 7)\n  .slice(0, 8);\n\nreturn rows.map((row) => ({\n  json: {\n    source: 'bbc_world',\n    source_url: row.link,\n    source_type: 'rss',\n    type: 'intel',\n    title: row.title,\n    summary: row.summary,\n    category: row.category,\n    importance: row.importance,\n    tags: row.tags,\n    why_it_matters: 'Bu gelisme kuresel risk dengesi, diplomasi veya ekonomi akisina etki edebilir.',\n    immediate_impact: 'Kisa vadeli etkisi izlenmeli.',\n    possible_outcomes: ['Gelisme derinlesirse piyasa ve diplomasi etkisi buyuyebilir', 'Gerilim azalirsa risk algisi yumusayabilir'],\n    confidence_hint: 0.84,\n    source_quality: 'high',\n    region: 'Global',\n    market_relevance: row.category === 'economy' ? 'high' : 'medium',\n    timestamp: row.isoDate\n  }\n}));"
+      },
+      "id": "b944e5de-969f-4eaa-9d50-5136024cab31",
+      "name": "Build World News Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5d558666-dbd8-4550-9b8f-a88628db0e22",
+              "leftValue": "={{$json.title}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "cab5b4c7-3da9-444e-a02e-4898e1b1c014",
+              "leftValue": "={{$json.summary}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cbf6dc87-978b-46b7-a436-b183d4a36d8b",
+      "name": "Payload Valid mi",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        512,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "86d5662d-b3ab-4b17-ad93-704f643d47bd",
+              "leftValue": "={{$json.importance}}",
+              "rightValue": 7,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e706a0b4-efae-461d-aad3-db39cb6d5f38",
+      "name": "Onem Esigi",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        496,
+        -256
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "source",
+              "value": "={{$json.source}}",
+              "type": "string"
+            },
+            {
+              "id": "2",
+              "name": "source_url",
+              "value": "={{$json.source_url}}",
+              "type": "string"
+            },
+            {
+              "id": "3",
+              "name": "source_type",
+              "value": "={{$json.source_type}}",
+              "type": "string"
+            },
+            {
+              "id": "4",
+              "name": "type",
+              "value": "={{$json.type}}",
+              "type": "string"
+            },
+            {
+              "id": "5",
+              "name": "title",
+              "value": "={{$json.title}}",
+              "type": "string"
+            },
+            {
+              "id": "6",
+              "name": "summary",
+              "value": "={{$json.summary}}",
+              "type": "string"
+            },
+            {
+              "id": "7",
+              "name": "category",
+              "value": "={{$json.category}}",
+              "type": "string"
+            },
+            {
+              "id": "8",
+              "name": "importance",
+              "value": "={{$json.importance}}",
+              "type": "number"
+            },
+            {
+              "id": "9",
+              "name": "tags",
+              "value": "={{$json.tags}}",
+              "type": "array"
+            },
+            {
+              "id": "10",
+              "name": "why_it_matters",
+              "value": "={{$json.why_it_matters}}",
+              "type": "string"
+            },
+            {
+              "id": "11",
+              "name": "immediate_impact",
+              "value": "={{$json.immediate_impact}}",
+              "type": "string"
+            },
+            {
+              "id": "12",
+              "name": "possible_outcomes",
+              "value": "={{$json.possible_outcomes}}",
+              "type": "array"
+            },
+            {
+              "id": "13",
+              "name": "timestamp",
+              "value": "={{$json.timestamp}}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "4f710822-b881-4549-ac6e-eb0bb5104592",
+      "name": "Clean Intel Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        -272
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://165.232.116.244:8000/events/ingest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-ayex-ingest-token",
+              "value": "REPLACE_WITH_INGEST_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{{ JSON.stringify({\n  type: $json.type || 'intel',\n  source: $json.source || 'n8n',\n  payload: {\n    title: $json.title,\n    summary: $json.summary,\n    category: $json.category,\n    importance: $json.importance,\n    tags: $json.tags,\n    timestamp: $json.timestamp || new Date().toISOString()\n  }\n}) }}",
+        "options": {},
+        "bodyContentType": "json",
+        "authentication": "none"
+      },
+      "id": "19921371-1957-49cd-8a30-08ea35a76ee3",
+      "name": "Send Event to AYEX",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1104,
+        -272
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read": {
+      "main": [
+        [
+          {
+            "node": "Build World News Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build World News Event": {
+      "main": [
+        [
+          {
+            "node": "Payload Valid mi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payload Valid mi": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Onem Esigi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Onem Esigi": {
+      "main": [
+        [
+          {
+            "node": "Clean Intel Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Intel Payload": {
+      "main": [
+        [
+          {
+            "node": "Send Event to AYEX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "1cc296b7-4511-4923-83c8-a58eaf5db7be",
+  "meta": {
+    "instanceId": "f9f7d571ab149b9c5f39182c051ae2dcaac33d914a5669120df9a874e1db615d"
+  },
+  "id": "GwRbqFHTrXoW3vpO",
+  "tags": []
+}
