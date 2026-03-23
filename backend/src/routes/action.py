@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request
 from backend.src.routes.deps import get_services
 from backend.src.schemas import ActionRequest, ActionResponse
 from backend.src.services.container import BackendServices
+from backend.src.services.query_context import build_query_context, collect_tool_evidence
 from backend.src.utils.logging import get_logger
 
 router = APIRouter()
@@ -92,46 +93,50 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
         )
 
     history = services.chat_store.model_context(session.id, turns=services.settings.model_context_turns)
-    profile_context = services.profile.prompt_context() if payload.use_profile else None
-    profile_data = services.profile.load() if payload.use_profile else {}
-    style_decision = services.style.detect(text, profile_style=str(profile_data.get("response_style") or ""))
-    intent = services.intents.route(text)
-    memory_context = services.chat_store.recall_context_text(
-        query=text,
-        exclude_session_id=session.id,
-        limit=4,
+    query_ctx = build_query_context(
+        services,
+        text=text,
+        session_id=session.id,
+        user_id=user_id,
+        use_profile=payload.use_profile,
+        max_intel_events=max(4, int(getattr(services.settings, "intel_prompt_max_events", 6) or 6)),
     )
-    long_memory_ctx = services.long_memory.build_context(query=text, limit=4, user_id=user_id)
-    long_memory_text = long_memory_ctx.as_text()
-    memory_hits = 0 if not memory_context else max(1, memory_context.count("\n"))
-    if long_memory_text:
-        memory_hits += len(long_memory_ctx.conversation_hits) + len(long_memory_ctx.event_hits)
-    if memory_hits > 0:
-        logger.info("MEMORY_USED route=action hits=%s", memory_hits)
+    if query_ctx.memory_hits > 0:
+        logger.info("MEMORY_USED route=action hits=%s", query_ctx.memory_hits)
 
-    tool_result = services.tools.route_and_run(intent=intent.category, text=text)
-    tool_context = tool_result.evidence_text()
+    tool_result = collect_tool_evidence(services, intent_category=query_ctx.intent_category, text=text)
+    tool_context = tool_result.text
     if tool_result.has_data:
         services.long_memory.append_event(
-            event_type=f"tool:{tool_result.selected_tool or intent.category}",
+            event_type=f"tool:{tool_result.selected_tool or query_ctx.intent_category}",
             payload={"query": text, "evidence": tool_context[:3000]},
             source="tool_router",
             user_id=user_id,
         )
 
-    merged_memory = "\n\n".join([x for x in [memory_context, long_memory_text] if x.strip()])
+    combined_profile_context = "\n\n".join(
+        [
+            part
+            for part in (
+                f"Yanit politikasi:\n{query_ctx.response_policy}",
+                query_ctx.profile_context,
+                f"Sorguya ilgili intel:\n{query_ctx.intel_context_text}" if query_ctx.intel_context_text else "",
+            )
+            if str(part or "").strip()
+        ]
+    )
     model_input = text
     if tool_context:
         model_input = f"Kullanici istegi: {text}\n\nTool kaniti:\n{tool_context}"
 
-    if intent.category == "agent_task":
+    if query_ctx.intent_category == "agent_task":
         agent_res = services.agent_mode.run(
             text=text,
             workspace=payload.workspace,
             model=payload.model,
-            profile_context=profile_context,
-            memory_context=merged_memory,
-            response_style=style_decision.style,
+            profile_context=combined_profile_context,
+            memory_context=query_ctx.merged_memory,
+            response_style=query_ctx.response_style,
         )
         result = agent_res.final
     else:
@@ -140,9 +145,9 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             workspace=payload.workspace,
             model=payload.model,
             history=history,
-            profile_context=profile_context,
-            memory_context=merged_memory,
-            response_style=style_decision.style,
+            profile_context=combined_profile_context,
+            memory_context=query_ctx.merged_memory,
+            response_style=query_ctx.response_style,
             route_name="action",
         )
 
@@ -160,21 +165,21 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             "token_budget": result.token_budget,
             "context_messages": result.context_messages,
             "ok": result.ok,
-            "memory_hits": memory_hits,
+            "memory_hits": query_ctx.memory_hits,
             "used_model": result.used_model or "",
             "model_locked": result.model_locked,
-            "response_style": style_decision.style,
-            "intent": intent.category,
+            "response_style": query_ctx.response_style,
+            "intent": query_ctx.intent_category,
             "tool": tool_result.selected_tool,
         },
     )
-    services.long_memory.sync_profile(profile_data, user_id=user_id)
+    services.long_memory.sync_profile(query_ctx.profile_data, user_id=user_id)
     services.long_memory.append_conversation(
         session_id=session.id,
         user_text=text,
         assistant_text=reply,
-        intent=intent.category,
-        style=style_decision.style,
+        intent=query_ctx.intent_category,
+        style=query_ctx.response_style,
         user_id=user_id,
     )
 
@@ -189,11 +194,11 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             "cache_hit": result.cache_hit,
             "token_budget": result.token_budget,
             "context_messages": result.context_messages,
-            "memory_hits": memory_hits,
+            "memory_hits": query_ctx.memory_hits,
             "used_model": result.used_model or "",
             "model_locked": result.model_locked,
-            "response_style": style_decision.style,
-            "intent": intent.category,
+            "response_style": query_ctx.response_style,
+            "intent": query_ctx.intent_category,
             "tool": tool_result.selected_tool,
         },
         raw=_compact_raw(result.raw),

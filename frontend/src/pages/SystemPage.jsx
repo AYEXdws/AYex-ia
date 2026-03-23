@@ -57,46 +57,54 @@ export default function SystemPage() {
       <BackgroundFX />
 
       <div className="relative z-10 mx-auto flex h-full w-full max-w-[1500px] flex-col gap-4 p-4 md:p-6">
-        <header className="glass-card flex items-center justify-between px-5 py-4">
-          <div>
-            <h1 className="text-xl font-bold tracking-[0.12em] text-cyan-100">AYEX IA</h1>
-            <p className="text-xs tracking-[0.2em] text-slate-400">PRIVATE INTELLIGENT SYSTEM</p>
+        <header className="glass-card flex flex-col gap-4 px-5 py-5 md:flex-row md:items-end md:justify-between md:px-7">
+          <div className="max-w-2xl">
+            <div className="section-kicker">Private Cognitive Console</div>
+            <h1 className="panel-title mt-2 text-3xl text-[var(--text)] md:text-[2.4rem]">AYEX IA</h1>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">
+              Bu yuzey rapor panosu degil. Burasi AYEX&apos;in seni taniyip baglamla dusunmesi, net karar vermesi ve
+              gereksiz laf kalabaligi yapmadan sana donmesi icin acik kanal.
+            </p>
           </div>
-          <div className="text-right text-xs text-slate-300">
-            <div className="tracking-[0.18em]">Premium Command Deck</div>
-            <div className="text-slate-500">Lux • Modern • Interactive</div>
+          <div className="grid gap-2 text-sm text-[var(--muted)] md:text-right">
+            <div className="section-kicker">System Focus</div>
+            <div>Hafiza, karar ve canli veri ayni omurgada calissin.</div>
           </div>
         </header>
 
         {!token ? (
-          <section className="glass-card mx-auto mt-8 w-full max-w-md p-6">
-            <h2 className="mb-4 text-lg font-semibold text-slate-100">Secure Login</h2>
+          <section className="glass-card mx-auto mt-8 w-full max-w-md p-6 md:p-7">
+            <div className="section-kicker">Secure Access</div>
+            <h2 className="panel-title mb-3 mt-2 text-2xl text-[var(--text)]">Sisteme giris</h2>
+            <p className="mb-5 text-sm leading-6 text-[var(--muted)]">
+              Giris sonrasi AYEX tek oturum hafizasiyla devam eder. Hedef chat degil, gercek baglam.
+            </p>
             <form onSubmit={login} className="space-y-3">
               <input
                 value={auth.username}
                 onChange={(e) => setAuth((s) => ({ ...s, username: e.target.value }))}
                 placeholder="Username"
-                className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm outline-none focus:border-cyan-300/60"
+                className="soft-input h-12 px-4 text-sm"
               />
               <input
                 type="password"
                 value={auth.password}
                 onChange={(e) => setAuth((s) => ({ ...s, password: e.target.value }))}
                 placeholder="Password"
-                className="h-11 w-full rounded-xl border border-white/15 bg-black/30 px-3 text-sm outline-none focus:border-cyan-300/60"
+                className="soft-input h-12 px-4 text-sm"
               />
-              {auth.error ? <p className="text-xs text-rose-300">{auth.error}</p> : null}
+              {auth.error ? <p className="text-xs text-[var(--danger)]">{auth.error}</p> : null}
               <button
                 type="submit"
                 disabled={auth.loading}
-                className="h-11 w-full rounded-xl border border-cyan-300/50 bg-cyan-500/10 text-xs tracking-[0.16em] text-cyan-100 hover:shadow-neon disabled:opacity-50"
+                className="soft-button h-12 w-full rounded-2xl text-xs tracking-[0.16em]"
               >
-                {auth.loading ? 'AUTHENTICATING...' : 'ENTER AYEX'}
+                {auth.loading ? 'GIRIS KONTROL EDILIYOR' : 'AYEX KANALINI AC'}
               </button>
             </form>
           </section>
         ) : (
-          <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[1fr_300px]">
+          <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_320px]">
             <ChatPanel token={token} onStatus={setStatus} />
             <StatusPanel status={status} onLogout={logout} />
           </section>

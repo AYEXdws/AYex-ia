@@ -16,6 +16,21 @@ class ResponseStyleService:
         normalized = self._normalize(text)
         if any(k in normalized for k in ("kisa anlat", "ozetle", "kisa gec", "kisa yaz")):
             return StyleDecision(style="brief", reason="keyword")
+        if any(
+            k in normalized
+            for k in (
+                "hangi coin",
+                "hangi kripto",
+                "hangi token",
+                "hangi hisse",
+                "almaliyim",
+                "almam lazim",
+                "en mantikli",
+                "kisa vadede",
+                "kisa vade",
+            )
+        ):
+            return StyleDecision(style="brief", reason="decision_query")
         if any(k in normalized for k in ("detayli anlat", "derin analiz", "ayrintili", "adim adim detay")):
             return StyleDecision(style="deep", reason="keyword")
 

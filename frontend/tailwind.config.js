@@ -5,21 +5,25 @@ export default {
     extend: {
       colors: {
         ayex: {
-          black: '#0B0B0F',
-          slate: '#111827',
-          cyan: '#00F0FF',
-          violet: '#8B5CF6'
+          ink: '#111315',
+          panel: '#181d22',
+          line: '#2a3138',
+          mist: '#d8d2c8',
+          clay: '#b48a61',
+          moss: '#70806d'
         }
       },
       boxShadow: {
-        neon: '0 0 0 1px rgba(0,240,255,.35), 0 0 32px rgba(0,240,255,.2)',
-        violet: '0 0 0 1px rgba(139,92,246,.45), 0 0 30px rgba(139,92,246,.25)'
+        panel: '0 24px 80px rgba(0, 0, 0, 0.28)',
+        inset: 'inset 0 1px 0 rgba(255,255,255,0.05)'
       },
       backdropBlur: {
         glass: '18px'
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI']
+        sans: ['Manrope', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI'],
+        display: ['Fraunces', 'Georgia', 'serif'],
+        mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace']
       }
     }
   },

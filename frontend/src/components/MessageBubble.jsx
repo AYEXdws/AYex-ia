@@ -12,17 +12,17 @@ export default function MessageBubble({ role, text, meta }) {
     >
       <div
         className={[
-          'max-w-[82%] rounded-2xl border px-4 py-3 text-sm leading-relaxed md:text-[15px]',
+          'max-w-[88%] rounded-[24px] border px-4 py-3 text-sm leading-relaxed md:text-[15px]',
           isUser
-            ? 'border-cyan-300/40 bg-cyan-400/10 text-cyan-50 shadow-neon'
-            : 'border-violet-300/35 bg-violet-500/10 text-slate-100 shadow-violet'
+            ? 'border-[rgba(180,138,97,0.28)] bg-[rgba(180,138,97,0.14)] text-[var(--text)]'
+            : 'border-[var(--line)] bg-[rgba(255,255,255,0.03)] text-[var(--text)]'
         ].join(' ')}
       >
         <div className="message-content whitespace-pre-wrap">
           <ReactMarkdown>{text}</ReactMarkdown>
         </div>
         {meta ? (
-          <div className="mt-2 text-[11px] uppercase tracking-[0.12em] text-slate-300/80">{meta}</div>
+          <div className="mt-2 text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">{meta}</div>
         ) : null}
       </div>
     </motion.div>

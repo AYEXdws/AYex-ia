@@ -11,6 +11,7 @@ from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
 from backend.src.services.model_router import ModelSelection, select_model
+from backend.src.services.query_context import build_query_context, collect_tool_evidence
 from backend.src.utils.logging import get_logger, log_event
 
 router = APIRouter()
@@ -284,45 +285,24 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
     services.chat_store.append_message(session.id, role="user", text=text, source="user")
     history = services.chat_store.model_context(session.id, turns=services.settings.model_context_turns)
 
-    all_events: list[Any] = []
-    try:
-        all_events = list(services.intel.store.get_all_events() or [])
-    except Exception as exc:
-        logger.info("CHAT_ALL_EVENTS_FETCH_FAIL error=%s", exc)
-    prompt_max_events = max(1, int(getattr(services.settings, "intel_prompt_max_events", 20) or 20))
-    prompt_max_chars = max(800, int(getattr(services.settings, "intel_prompt_max_chars", 4200) or 4200))
-    intel_text = _format_all_events(
-        all_events,
-        max_events=prompt_max_events,
-        max_chars=prompt_max_chars,
+    query_ctx = build_query_context(
+        services,
+        text=text,
+        session_id=session.id,
+        user_id=user_id,
+        use_profile=True,
+        max_intel_events=max(4, int(getattr(services.settings, "intel_prompt_max_events", 6) or 6)),
     )
-    event_count = len(all_events)
-    logger.info(
-        "CHAT_INTEL_PROMPT_BUDGET events_total=%s max_events=%s max_chars=%s rendered_chars=%s",
-        event_count,
-        prompt_max_events,
-        prompt_max_chars,
-        len(intel_text),
+    tool_evidence = collect_tool_evidence(
+        services,
+        intent_category=query_ctx.intent_category,
+        text=text,
     )
-
-    memory_context = ""
-    try:
-        memory_context = services.memory.get_memory_context(text)
-    except Exception as exc:
-        logger.info("CHAT_MEMORY_CONTEXT_FAIL error=%s", exc)
-
-    profile_context = ""
-    try:
-        profile_context = services.profile.prompt_context()
-    except Exception as exc:
-        logger.info("CHAT_PROFILE_CONTEXT_FAIL error=%s", exc)
-
-    system_prompt = _build_system_prompt(
-        intel_text=intel_text,
-        event_count=event_count,
-        memory_context=memory_context,
-        profile_context=profile_context,
-    )
+    event_count = int(query_ctx.intel_context.get("event_count") or len(query_ctx.intel_context.get("key_events") or []))
+    if query_ctx.memory_hits > 0:
+        logger.info("CHAT_MEMORY_USED hits=%s intent=%s", query_ctx.memory_hits, query_ctx.intent_category)
+    if tool_evidence.has_data:
+        logger.info("CHAT_TOOL_USED tool=%s", tool_evidence.selected_tool or "unknown")
 
     model_selection = _select_model_simple(
         text=text,
@@ -348,10 +328,25 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
     result = None
     reply = ""
     model_input = text
-    used_model_for_reply = model_selection.model
+    if tool_evidence.text:
+        model_input = f"Kullanici istegi: {text}\n\nCanli arac kaniti:\n{tool_evidence.text}"
+
+    combined_profile_context = "\n\n".join(
+        [
+            part
+            for part in (
+                f"Yanit politikasi:\n{query_ctx.response_policy}",
+                query_ctx.profile_context,
+                f"Sorguya ilgili intel:\n{query_ctx.intel_context_text}" if query_ctx.intel_context_text else "",
+            )
+            if str(part or "").strip()
+        ]
+    )
+    combined_memory_context = query_ctx.merged_memory
+    used_model_for_reply = str(payload.model or "").strip() or model_selection.model
     # Power sorularda iki model birlikte calisir:
     # Sonnet analiz cikarir, Power model son karari verir.
-    if model_selection.route == "power":
+    if model_selection.route == "power" and not str(payload.model or "").strip():
         reasoning_model = str(getattr(services.settings, "ayex_reasoning_model", "") or "").strip()
         if reasoning_model and reasoning_model != model_selection.model:
             try:
@@ -360,8 +355,8 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
                     workspace=payload.workspace,
                     model=reasoning_model,
                     history=history,
-                    profile_context=system_prompt,
-                    memory_context=memory_context,
+                    profile_context=combined_profile_context,
+                    memory_context=combined_memory_context,
                     response_style="deep",
                     route_name="chat_power_pre_reasoning",
                 )
@@ -376,7 +371,8 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             except Exception as exc:
                 logger.info("CHAT_MODEL_COLLAB_SKIP error=%s", exc)
 
-    fallback_chain = list(getattr(model_selection, "fallback_chain", ()) or (model_selection.model,))
+    explicit_model = str(payload.model or "").strip()
+    fallback_chain = [explicit_model] if explicit_model else list(getattr(model_selection, "fallback_chain", ()) or (model_selection.model,))
     max_attempts = 3
     if not fallback_chain:
         fallback_chain = [model_selection.model]
@@ -388,9 +384,9 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
                 workspace=payload.workspace,
                 model=candidate_model,
                 history=history,
-                profile_context=system_prompt,
-                memory_context=memory_context,
-                response_style="normal",
+                profile_context=combined_profile_context,
+                memory_context=combined_memory_context,
+                response_style=query_ctx.response_style,
                 route_name=f"chat_{model_selection.route}_attempt{idx + 1}",
             )
             reply = str(getattr(result, "text", "") or "").strip()
@@ -437,6 +433,9 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             "route_confidence": float(getattr(model_selection, "confidence", 0.0) or 0.0),
             "route_signals": list(getattr(model_selection, "signals", ()) or ()),
             "event_count": event_count,
+            "intent": query_ctx.intent_category,
+            "tool": tool_evidence.selected_tool,
+            "memory_hits": query_ctx.memory_hits,
             "source": source,
             "mode": response_style,
             "response_style": response_style,
@@ -444,14 +443,20 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
     )
 
     try:
-        profile_data = services.profile.load()
-        services.long_memory.sync_profile(profile_data, user_id=user_id)
+        if tool_evidence.has_data:
+            services.long_memory.append_event(
+                event_type=f"tool:{tool_evidence.selected_tool or query_ctx.intent_category}",
+                payload={"query": text, "evidence": tool_evidence.text[:3000]},
+                source="tool_router",
+                user_id=user_id,
+            )
+        services.long_memory.sync_profile(query_ctx.profile_data, user_id=user_id)
         services.long_memory.append_conversation(
             session_id=session.id,
             user_text=text,
             assistant_text=reply,
-            intent="chat",
-            style="normal",
+            intent=query_ctx.intent_category,
+            style=query_ctx.response_style,
             user_id=user_id,
         )
     except Exception as exc:
@@ -468,6 +473,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         source=source,
         latency_ms=latency_ms,
         event_count=event_count,
+        intent=query_ctx.intent_category,
     )
 
     return ChatResponse(
@@ -484,5 +490,8 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             "route_reason": model_selection.reason,
             "route_confidence": float(getattr(model_selection, "confidence", 0.0) or 0.0),
             "event_count": event_count,
+            "intent": query_ctx.intent_category,
+            "tool": tool_evidence.selected_tool,
+            "memory_hits": query_ctx.memory_hits,
         },
     )

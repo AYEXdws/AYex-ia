@@ -404,3 +404,13 @@ Auth gerektiren endpointler:
 
 Bu repo su anda OpenClaw bridge kullanmadan, dogrudan provider SDK'lari ile calisan AYEX-IA runtime'ini temsil eder.
 
+## 17) Core Docs
+
+Omurga ve uygulama sirasi icin once su dosyalari oku:
+- `VISION.md`
+- `CORE_IDENTITY.md`
+- `ARCHITECTURE.md`
+- `PROJECT_STATE.md`
+- `PHASES.md`
+- `REPO_STRUCTURE.md`
+- `IMPLEMENTATION_PLAN.md`
