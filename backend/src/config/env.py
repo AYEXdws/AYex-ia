@@ -31,6 +31,10 @@ class BackendSettings:
     chat_dir: str
     daily_request_limit: int
     daily_input_char_limit: int
+    intel_ingest_token: str
+    intel_ingest_rate_per_minute: int
+    intel_prompt_max_events: int
+    intel_prompt_max_chars: int
 
 
 def load_settings() -> BackendSettings:
@@ -124,6 +128,10 @@ def load_settings() -> BackendSettings:
         chat_dir=str(chat_dir),
         daily_request_limit=max(10, int(os.environ.get("AYEX_DAILY_REQUEST_LIMIT", "350"))),
         daily_input_char_limit=max(1000, int(os.environ.get("AYEX_DAILY_INPUT_CHAR_LIMIT", "120000"))),
+        intel_ingest_token=(os.environ.get("AYEX_INTEL_INGEST_TOKEN") or "").strip(),
+        intel_ingest_rate_per_minute=max(10, int(os.environ.get("AYEX_INTEL_INGEST_RPM", "120"))),
+        intel_prompt_max_events=max(4, min(40, int(os.environ.get("AYEX_INTEL_PROMPT_MAX_EVENTS", "20")))),
+        intel_prompt_max_chars=max(1200, min(20000, int(os.environ.get("AYEX_INTEL_PROMPT_MAX_CHARS", "4200")))),
     )
 
 

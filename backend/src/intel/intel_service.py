@@ -10,6 +10,68 @@ from backend.src.intel.intel_store import IntelStore
 from backend.src.utils.logging import get_logger
 
 logger = get_logger(__name__)
+_ALLOWED_CATEGORIES = {"economy", "security", "tech", "global", "other"}
+_CATEGORY_ALIAS = {
+    "economy": "economy",
+    "market": "economy",
+    "finance": "economy",
+    "financial": "economy",
+    "crypto": "economy",
+    "macroeconomy": "economy",
+    "macro": "economy",
+    "security": "security",
+    "cyber": "security",
+    "cybersecurity": "security",
+    "infosec": "security",
+    "tech": "tech",
+    "technology": "tech",
+    "ai": "tech",
+    "global": "global",
+    "world": "global",
+    "geopolitics": "global",
+    "geopolitic": "global",
+    "other": "other",
+}
+
+
+def _clean_text(value: str) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _normalize_event_timestamp(value) -> datetime:
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    if value is None:
+        return now_utc.replace(tzinfo=None)
+    dt: datetime
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, (int, float)):
+        epoch = float(value)
+        if epoch > 10_000_000_000:
+            epoch = epoch / 1000.0
+        dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+    elif isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return now_utc.replace(tzinfo=None)
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("timestamp_invalid") from exc
+    else:
+        raise ValueError("timestamp_invalid")
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+
+    if dt > (now_utc + timedelta(minutes=15)):
+        raise ValueError("timestamp_future")
+    if dt < (now_utc - timedelta(days=90)):
+        raise ValueError("timestamp_too_old")
+
+    return dt.replace(tzinfo=None)
 
 
 def _normalize_text(text: str) -> str:
@@ -306,44 +368,45 @@ class IntelService:
         return self.store.add_event(event)
 
     def validate_event_payload(self, payload: dict) -> dict:
-        allowed_categories = {"economy", "security", "tech", "global", "other"}
-        title = str(payload.get("title") or "").strip()
-        summary = str(payload.get("summary") or "").strip()
-        if len(title) < 5:
+        title = _clean_text(payload.get("title") or "")
+        summary = _clean_text(payload.get("summary") or "")
+        if len(title) < 8 or len(title) > 220:
             raise ValueError("title_invalid")
-        if len(summary) < 10:
+        if len(summary) < 16 or len(summary) > 1600:
             raise ValueError("summary_invalid")
 
-        category = str(payload.get("category") or "other").strip().lower()
-        if category not in allowed_categories:
-            category = "other"
+        category_raw = _normalize_text(_clean_text(payload.get("category") or "other"))
+        category = _CATEGORY_ALIAS.get(category_raw, category_raw)
+        if category not in _ALLOWED_CATEGORIES:
+            raise ValueError("category_invalid")
 
         importance_raw = payload.get("importance", 5)
         try:
             importance = int(float(importance_raw))
         except (TypeError, ValueError):
-            importance = 5
+            raise ValueError("importance_invalid")
         importance = max(1, min(10, importance))
 
         tags_raw = payload.get("tags")
         tags: list[str] = []
         if isinstance(tags_raw, list):
             for item in tags_raw:
-                val = str(item or "").strip().lower()
+                val = _normalize_text(_clean_text(item))
                 if not val:
                     continue
-                tags.append(val[:24])
+                val = re.sub(r"[^a-z0-9_\-.:]+", "", val)
+                if not val:
+                    continue
+                tags.append(val[:32])
                 if len(tags) >= 5:
                     break
 
-        source = str(payload.get("source") or "unknown").strip() or "unknown"
-        ts_raw = payload.get("timestamp")
-        ts = datetime.utcnow()
-        if isinstance(ts_raw, str) and ts_raw.strip():
-            try:
-                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-            except ValueError:
-                ts = datetime.utcnow()
+        source = _normalize_text(_clean_text(payload.get("source") or "n8n"))
+        source = re.sub(r"[^a-z0-9_\-.:]+", "_", source).strip("_")
+        if len(source) < 2 or len(source) > 64:
+            raise ValueError("source_invalid")
+
+        ts = _normalize_event_timestamp(payload.get("timestamp"))
 
         return {
             "source": source,

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import hmac
+import threading
+import time
+from collections import deque
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from backend.src.routes.deps import get_services
@@ -8,6 +13,8 @@ from backend.src.utils.logging import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)
+_INGEST_LOCK = threading.Lock()
+_INGEST_HITS: dict[str, deque[float]] = {}
 
 
 @router.get("/events/latest")
@@ -40,6 +47,13 @@ def latest_events(
 @router.post("/events/ingest")
 async def ingest_event(request: Request, services: BackendServices = Depends(get_services)) -> dict:
     user_id = str(getattr(request.state, "user_id", "default"))
+    expected_token = str(getattr(services.settings, "intel_ingest_token", "") or "").strip()
+    if expected_token:
+        provided = (request.headers.get("x-ayex-ingest-token") or request.headers.get("x-intel-token") or "").strip()
+        if not provided or not hmac.compare_digest(provided, expected_token):
+            logger.info("EVENT_REJECTED reason=ingest_token_invalid")
+            return {"status": "skipped", "reason": "unauthorized"}
+
     try:
         body = await request.json()
         if not isinstance(body, dict):
@@ -54,6 +68,23 @@ async def ingest_event(request: Request, services: BackendServices = Depends(get
     payload_inner = body.get("payload")
     if isinstance(payload_inner, dict):
         merged = {**payload_inner, "type": body.get("type", payload_inner.get("type")), "source": body.get("source", payload_inner.get("source"))}
+
+    source_hint = str(merged.get("source") or body.get("source") or "unknown").strip().lower() or "unknown"
+    limit_per_minute = max(0, int(getattr(services.settings, "intel_ingest_rate_per_minute", 120) or 120))
+    if limit_per_minute > 0:
+        client_host = "unknown"
+        if getattr(request, "client", None) and getattr(request.client, "host", None):
+            client_host = str(request.client.host)
+        rate_key = f"{client_host}|{source_hint}"
+        now = time.monotonic()
+        with _INGEST_LOCK:
+            bucket = _INGEST_HITS.setdefault(rate_key, deque())
+            while bucket and (now - bucket[0]) > 60.0:
+                bucket.popleft()
+            if len(bucket) >= limit_per_minute:
+                logger.info("EVENT_REJECTED reason=rate_limited key=%s rpm=%s", rate_key, limit_per_minute)
+                return {"status": "skipped", "reason": "rate_limited"}
+            bucket.append(now)
 
     logger.info("EVENT_RECEIVED source=%s type=%s", merged.get("source"), merged.get("type"))
     try:

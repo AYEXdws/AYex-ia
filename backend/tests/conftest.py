@@ -45,4 +45,8 @@ def make_settings(tmp_path: Path) -> BackendSettings:
         chat_dir=str(chats),
         daily_request_limit=350,
         daily_input_char_limit=120000,
+        intel_ingest_token="",
+        intel_ingest_rate_per_minute=120,
+        intel_prompt_max_events=20,
+        intel_prompt_max_chars=4200,
     )

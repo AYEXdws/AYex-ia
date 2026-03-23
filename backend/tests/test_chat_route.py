@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
-from backend.src.routes.chat import chat
+from backend.src.routes.chat import _format_all_events, chat
 from backend.src.schemas import ChatRequest
 
 
@@ -155,3 +155,23 @@ def test_chat_success_persists_user_and_assistant_messages():
     assert services.chat_store.appended[0][1] == "user"
     assert services.chat_store.appended[1][1] == "assistant"
     assert services.model.calls == 1
+
+
+def test_format_all_events_respects_prompt_budget():
+    events = []
+    for idx in range(25):
+        events.append(
+            SimpleNamespace(
+                title=f"Event {idx}",
+                summary="A" * 400,
+                category="economy",
+                source="n8n",
+                timestamp=datetime.utcnow(),
+                tags=["btc", "macro"],
+            )
+        )
+
+    text = _format_all_events(events, max_events=25, max_chars=1200)
+
+    assert len(text) <= 1200
+    assert "prompt butcesi" in text or "EVENT" in text.upper()

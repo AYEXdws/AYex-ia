@@ -71,6 +71,8 @@ Model ayarlari:
 - `AYEX_MODEL_CONTEXT_TURNS`
 - `AYEX_MODEL_CACHE_TTL_SEC`
 - `AYEX_MODEL_CACHE_SIZE`
+- `AYEX_INTEL_PROMPT_MAX_EVENTS`
+- `AYEX_INTEL_PROMPT_MAX_CHARS`
 - `AYEX_MODEL_INSTRUCTIONS` (opsiyonel override)
 
 Uygulama ayarlari:
@@ -80,6 +82,8 @@ Uygulama ayarlari:
 - `AYEX_CHAT_DIR`
 - `AYEX_DAILY_REQUEST_LIMIT`
 - `AYEX_DAILY_INPUT_CHAR_LIMIT`
+- `AYEX_INTEL_INGEST_TOKEN` (opsiyonel ikinci katman token kontrolu)
+- `AYEX_INTEL_INGEST_RPM` (`/events/ingest` dakika basi limit)
 - `AYEX_AUDIO_ENGINE_DEFAULT` (default `openai`)
 - `AYEX_STT_MODEL`, `AYEX_TTS_MODEL`, `AYEX_DEFAULT_VOICE`
 

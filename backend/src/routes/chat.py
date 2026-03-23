@@ -17,10 +17,28 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-def _format_all_events(events: list[Any]) -> str:
-    """Tum eventleri kategorize ederek metin haline getirir."""
+def _format_all_events(
+    events: list[Any],
+    *,
+    max_events: int = 20,
+    max_chars: int = 4200,
+    max_events_per_category: int = 8,
+    max_summary_chars: int = 220,
+) -> str:
+    """Tum eventleri kategorize ederek metin haline getirir.
+
+    Deterministic prompt butcesi:
+    - once zaman sirasina gore sirala
+    - kategori bazinda sinirla
+    - toplam karakter butcesini gecme
+    """
     if not events:
         return ""
+
+    safe_max_events = max(1, min(60, int(max_events or 20)))
+    safe_max_chars = max(800, min(20000, int(max_chars or 4200)))
+    safe_per_category = max(1, min(20, int(max_events_per_category or 8)))
+    safe_summary_chars = max(80, min(500, int(max_summary_chars or 220)))
 
     def _ts_key(event: Any) -> str:
         ts = getattr(event, "timestamp", None)
@@ -28,8 +46,11 @@ def _format_all_events(events: list[Any]) -> str:
 
     sorted_events = sorted(list(events or []), key=_ts_key, reverse=True)
     categories: dict[str, list[str]] = {}
+    total_candidates = 0
 
-    for ev in sorted_events[:20]:
+    for ev in sorted_events:
+        if total_candidates >= safe_max_events:
+            break
         title = str(getattr(ev, "title", "") or "").strip()
         if not title:
             continue
@@ -41,10 +62,13 @@ def _format_all_events(events: list[Any]) -> str:
         ts_str = timestamp.isoformat() if hasattr(timestamp, "isoformat") else ""
         tags = list(getattr(ev, "tags", []) or [])[:4]
 
-        categories.setdefault(category, [])
+        entries = categories.setdefault(category, [])
+        if len(entries) >= safe_per_category:
+            continue
+
         entry = f"- {title}"
         if summary:
-            entry += f"\n  {summary[:250]}"
+            entry += f"\n  {summary[:safe_summary_chars]}"
 
         meta_parts: list[str] = []
         if source:
@@ -56,16 +80,37 @@ def _format_all_events(events: list[Any]) -> str:
         if meta_parts:
             entry += f"\n  [{' | '.join(meta_parts)}]"
 
-        categories[category].append(entry)
+        entries.append(entry)
+        total_candidates += 1
 
     if not categories:
         return ""
 
-    lines: list[str] = []
+    segments: list[tuple[str, str]] = []
     for cat, entries in categories.items():
-        lines.append(f"\n{cat}:")
-        lines.extend(entries)
-    return "\n".join(lines)
+        segments.append(("header", f"\n{cat}:\n"))
+        for entry in entries:
+            segments.append(("event", f"{entry}\n"))
+
+    used_chars = 0
+    used_events = 0
+    out_parts: list[str] = []
+    for kind, chunk in segments:
+        chunk_len = len(chunk)
+        if used_chars + chunk_len > safe_max_chars:
+            break
+        out_parts.append(chunk)
+        used_chars += chunk_len
+        if kind == "event":
+            used_events += 1
+
+    hidden_events = max(0, total_candidates - used_events)
+    if hidden_events > 0:
+        suffix = f"\n... +{hidden_events} event daha var (prompt butcesi nedeniyle kisaltildi)\n"
+        if used_chars + len(suffix) <= safe_max_chars:
+            out_parts.append(suffix)
+
+    return "".join(out_parts).strip()
 
 
 def _build_system_prompt(
@@ -257,8 +302,21 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         all_events = list(services.intel.store.get_all_events() or [])
     except Exception as exc:
         logger.info("CHAT_ALL_EVENTS_FETCH_FAIL error=%s", exc)
-    intel_text = _format_all_events(all_events)
+    prompt_max_events = max(1, int(getattr(services.settings, "intel_prompt_max_events", 20) or 20))
+    prompt_max_chars = max(800, int(getattr(services.settings, "intel_prompt_max_chars", 4200) or 4200))
+    intel_text = _format_all_events(
+        all_events,
+        max_events=prompt_max_events,
+        max_chars=prompt_max_chars,
+    )
     event_count = len(all_events)
+    logger.info(
+        "CHAT_INTEL_PROMPT_BUDGET events_total=%s max_events=%s max_chars=%s rendered_chars=%s",
+        event_count,
+        prompt_max_events,
+        prompt_max_chars,
+        len(intel_text),
+    )
 
     memory_context = ""
     try:
