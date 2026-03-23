@@ -113,6 +113,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
         text=text,
         intel_context=query_ctx.intel_context,
         latest_events=latest_events,
+        profile_data=query_ctx.profile_data,
     ).as_dict()
     if query_ctx.memory_hits > 0:
         logger.info("MEMORY_USED route=action hits=%s", query_ctx.memory_hits)
@@ -133,6 +134,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             part
             for part in (
                 f"Yanit politikasi:\n{query_ctx.response_policy}",
+                f"Calisma modu: {query_ctx.response_mode}",
                 query_ctx.profile_context,
                 f"Proaktif brief:\n{proactive_brief.get('summary')}" if proactive_brief.get("summary") else "",
                 f"Karar notu:\n{decision_block}" if decision.get("active") else "",
@@ -153,7 +155,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             workspace=payload.workspace,
             model=payload.model,
             profile_context=combined_profile_context,
-            memory_context=query_ctx.merged_memory,
+            memory_context="" if query_ctx.response_mode == "decision" else query_ctx.merged_memory,
             response_style=query_ctx.response_style,
         )
         result = agent_res.final
@@ -164,7 +166,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             model=payload.model,
             history=history,
             profile_context=combined_profile_context,
-            memory_context=query_ctx.merged_memory,
+            memory_context="" if query_ctx.response_mode == "decision" else query_ctx.merged_memory,
             response_style=query_ctx.response_style,
             route_name="action",
         )
@@ -197,6 +199,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             "model_locked": result.model_locked,
             "response_style": query_ctx.response_style,
             "intent": query_ctx.intent_category,
+            "response_mode": query_ctx.response_mode,
             "tool": tool_result.selected_tool,
             "decision": decision,
             "proactive_brief": proactive_brief,
@@ -229,6 +232,7 @@ def action(payload: ActionRequest, request: Request, services: BackendServices =
             "model_locked": result.model_locked,
             "response_style": query_ctx.response_style,
             "intent": query_ctx.intent_category,
+            "response_mode": query_ctx.response_mode,
             "tool": tool_result.selected_tool,
             "decision": decision,
             "proactive_brief": proactive_brief,

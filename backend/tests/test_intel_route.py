@@ -72,6 +72,14 @@ class _FakeIntel:
 class _FakeServices:
     def __init__(self):
         self.intel = _FakeIntel()
+        self.profile = SimpleNamespace(
+            load=lambda: {
+                "assistant_name": "AYEX",
+                "feedback_style": "sert ve net",
+                "preferred_categories": ["security", "economy"],
+                "focus_projects": ["AYEX-IA"],
+            }
+        )
 
 
 def test_intel_brief_includes_market_focus_cards():
@@ -93,3 +101,5 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["live_inventory"]["feeds"]["crypto"]["available"] is True
     assert payload["live_inventory"]["feeds"]["macro"]["available"] is True
     assert payload["live_inventory"]["feeds"]["cyber"]["available"] is True
+    assert payload["persona_focus"]["assistant_name"] == "AYEX"
+    assert payload["persona_focus"]["feedback_style"] == "sert ve net"

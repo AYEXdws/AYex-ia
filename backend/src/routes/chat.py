@@ -258,6 +258,8 @@ def _is_live_data_query(text: str) -> bool:
 def _should_suppress_memory(text: str) -> bool:
     if _is_live_data_query(text):
         return True
+    if is_market_decision_query(text):
+        return True
     low = _normalize_reply(text)
     current_domain_markers = (
         "guncel makro",
@@ -514,6 +516,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         text=text,
         intel_context=query_ctx.intel_context,
         latest_events=latest_events,
+        profile_data=query_ctx.profile_data,
     ).as_dict()
     event_count = int(query_ctx.intel_context.get("event_count") or len(query_ctx.intel_context.get("key_events") or []))
     if query_ctx.memory_hits > 0:
@@ -556,6 +559,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             part
             for part in (
                 f"Yanit politikasi:\n{query_ctx.response_policy}",
+                f"Calisma modu: {query_ctx.response_mode}",
                 query_ctx.profile_context,
                 f"Proaktif brief:\n{proactive_brief.get('summary')}" if proactive_brief.get("summary") else "",
                 f"Karar notu:\n{decision_block}" if decision.get("active") else "",
@@ -666,6 +670,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             "route_signals": list(getattr(model_selection, "signals", ()) or ()),
             "event_count": event_count,
             "intent": query_ctx.intent_category,
+            "response_mode": query_ctx.response_mode,
             "tool": tool_evidence.selected_tool,
             "memory_hits": query_ctx.memory_hits,
             "decision": decision,
@@ -726,6 +731,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
             "route_confidence": float(getattr(model_selection, "confidence", 0.0) or 0.0),
             "event_count": event_count,
             "intent": query_ctx.intent_category,
+            "response_mode": query_ctx.response_mode,
             "tool": tool_evidence.selected_tool,
             "memory_hits": query_ctx.memory_hits,
             "decision": decision,

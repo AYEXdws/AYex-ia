@@ -5,12 +5,14 @@ from types import SimpleNamespace
 from typing import Any
 
 from backend.src.intel.intel_service import get_intel_summary, select_relevant_intel_context
+from backend.src.services.market_decision import is_market_decision_query
 
 
 @dataclass(frozen=True)
 class QueryContextBundle:
     intent_category: str
     response_style: str
+    response_mode: str
     profile_data: dict[str, Any]
     profile_context: str
     memory_context: str
@@ -66,6 +68,11 @@ def build_query_context(
     else:
         intent_result = SimpleNamespace(category="chat")
     intent_category = str(getattr(intent_result, "category", "chat") or "chat")
+    response_mode = detect_response_mode(
+        text,
+        intent_category=intent_category,
+        response_style=response_style,
+    )
 
     memory_context = ""
     try:
@@ -150,6 +157,7 @@ def build_query_context(
         text,
         intent_category=intent_category,
         response_style=response_style,
+        response_mode=response_mode,
         profile_data=profile_data,
         intel_context=intel_context,
     )
@@ -157,6 +165,7 @@ def build_query_context(
     return QueryContextBundle(
         intent_category=intent_category,
         response_style=response_style,
+        response_mode=response_mode,
         profile_data=profile_data,
         profile_context=profile_context,
         memory_context=memory_context,
@@ -201,6 +210,7 @@ def build_explainability_trace(
         "route": route,
         "model": model,
         "intent": query_ctx.intent_category,
+        "response_mode": query_ctx.response_mode,
         "tool": tool,
         "memory": list(query_ctx.memory_preview),
         "intel": list(query_ctx.intel_preview),
@@ -218,6 +228,7 @@ def build_response_policy(
     *,
     intent_category: str,
     response_style: str,
+    response_mode: str,
     profile_data: dict[str, Any] | None = None,
     intel_context: dict[str, Any] | None = None,
 ) -> str:
@@ -230,6 +241,21 @@ def build_response_policy(
         "Teknik jargon varsa sadeleştir; 'ne oldu, neden onemli, Ahmet icin sonucu ne' mantigi ile acikla.",
         "Yanitin omurgasi kararli olsun. Ozellikle analiz ve secim sorularinda belirsiz gevezelik yapma.",
     ]
+
+    if response_mode == "inventory":
+        parts.append(
+            "Bu bir canli durum envanteri sorusu. Feed bazli cevap ver: Kripto, Hisse, Makro, World, Cyber. "
+            "Her satirda aktif/pasif durumu, freshness ve son eventi belirt."
+        )
+    elif response_mode == "decision":
+        parts.append(
+            "Bu bir karar modu cevabi. Ilk satirda tek hukum ver. Sonra en fazla 2 neden ve 1 risk yaz. "
+            "Eski sohbeti gereksiz yere tasima; canli sinyali oncele."
+        )
+    elif response_mode == "analysis":
+        parts.append(
+            "Bu bir analiz modu cevabi. Gerekirse hedef, varsayim, plan, risk ve alternatif sirasi ile ilerle."
+        )
 
     if response_style == "brief":
         parts.append("Cevap boyu: kisa. Gerekirse 2-4 cumle.")
@@ -277,7 +303,26 @@ def build_response_policy(
     if feedback_style in {"sert", "sert ve net", "net"}:
         parts.append("Ton: net, direkt, yumusatma yok; ama bos sertlik de yok.")
 
+    work_framework = [str(item).strip() for item in (profile_data.get("work_framework") or []) if str(item).strip()]
+    if response_mode == "analysis" and work_framework:
+        parts.append("Ahmet'in tercih ettigi analiz sirasi: " + " > ".join(work_framework[:6]) + ".")
+
     return "\n".join(parts).strip()
+
+
+def detect_response_mode(text: str, *, intent_category: str, response_style: str) -> str:
+    low = _normalize(text)
+    if _is_live_inventory_query(low):
+        return "inventory"
+    if is_market_decision_query(low):
+        return "decision"
+    if intent_category in {"search", "url_read", "agent_task"}:
+        return "analysis"
+    if any(token in low for token in ("analiz", "strateji", "plan", "karsilastir", "karşılaştır", "neden", "niye", "risk", "varsayim", "varsayım")):
+        return "analysis"
+    if response_style == "brief":
+        return "brief"
+    return "normal"
 
 
 def _normalize(text: str) -> str:
@@ -293,6 +338,27 @@ def _normalize(text: str) -> str:
     for src, dst in repl.items():
         out = out.replace(src, dst)
     return " ".join(out.split())
+
+
+def _is_live_inventory_query(text: str) -> bool:
+    markers = (
+        "su an elinde",
+        "şu an elinde",
+        "elindeki canli veriler",
+        "elindeki canlı veriler",
+        "hangi canli veriler",
+        "hangi canlı veriler",
+        "guncel veriler neler",
+        "güncel veriler neler",
+        "canli veriler neler",
+        "canlı veriler neler",
+        "hangi feedler",
+        "hangi feed'ler",
+        "hangi veriler var",
+        "neler goruyorsun",
+        "neler görüyorsun",
+    )
+    return any(marker in text for marker in markers)
 
 
 def _memory_preview(memory_context: str, long_memory_text: str) -> tuple[str, ...]:

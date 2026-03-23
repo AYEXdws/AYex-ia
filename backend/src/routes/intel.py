@@ -15,6 +15,11 @@ router = APIRouter()
 @router.get("/intel")
 def intel_brief(request: Request, services: BackendServices = Depends(get_services)) -> dict:
     user_id = str(getattr(request.state, "user_id", "default"))
+    profile_data = {}
+    try:
+        profile_data = dict(getattr(services.profile, "load")() or {})
+    except Exception:
+        profile_data = {}
     daily = services.intel.get_daily_brief(user_id=user_id)
     proactive = build_proactive_briefing(services.intel, user_id=user_id, limit=6)
     latest_events = list(services.intel.get_latest_events(limit=20) or [])
@@ -22,9 +27,15 @@ def intel_brief(request: Request, services: BackendServices = Depends(get_servic
     return {
         **(daily or {}),
         "proactive": proactive,
-        "market_focus": _build_market_focus(services=services, user_id=user_id, latest_events=latest_events),
+        "market_focus": _build_market_focus(
+            services=services,
+            user_id=user_id,
+            latest_events=latest_events,
+            profile_data=profile_data,
+        ),
         "domain_focus": _build_domain_focus(inventory_events),
         "live_inventory": build_live_inventory(inventory_events),
+        "persona_focus": _build_persona_focus(profile_data),
     }
 
 
@@ -38,7 +49,7 @@ def _inventory_events(services: BackendServices) -> list:
     return list(getattr(services.intel, "get_latest_events")(limit=80) or [])
 
 
-def _build_market_focus(*, services: BackendServices, user_id: str, latest_events: list) -> dict:
+def _build_market_focus(*, services: BackendServices, user_id: str, latest_events: list, profile_data: dict) -> dict:
     prompts = {
         "crypto": "1-2 ay icin hangi kripto daha mantikli?",
         "equities": "1-2 ay icin hangi hisse daha mantikli?",
@@ -55,11 +66,13 @@ def _build_market_focus(*, services: BackendServices, user_id: str, latest_event
             text=query,
             intel_context=intel_context,
             latest_events=latest_events,
+            profile_data=profile_data,
         ).as_dict()
         decisions[f"{key}_signals"] = build_asset_signal_board(
             text=query,
             intel_context=intel_context,
             latest_events=latest_events,
+            profile_data=profile_data,
             limit=4,
         )
     decisions["macro"] = _build_macro_focus(latest_events)
@@ -123,4 +136,15 @@ def _build_macro_focus(latest_events: list) -> dict:
         "summary": title or "Makro ozet guncellendi.",
         "signal": signal,
         "reasons": reasons[:2],
+    }
+
+
+def _build_persona_focus(profile_data: dict) -> dict:
+    preferred_categories = [str(item).strip() for item in (profile_data.get("preferred_categories") or []) if str(item).strip()]
+    focus_projects = [str(item).strip() for item in (profile_data.get("focus_projects") or []) if str(item).strip()]
+    return {
+        "assistant_name": str(profile_data.get("assistant_name") or "AYEX").strip(),
+        "feedback_style": str(profile_data.get("feedback_style") or "").strip() or "net",
+        "preferred_categories": preferred_categories[:3],
+        "focus_projects": focus_projects[:3],
     }

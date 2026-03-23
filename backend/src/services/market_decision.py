@@ -85,6 +85,11 @@ NEGATIVE_MARKERS = (
     "en cok dusen",
 )
 
+AI_EQUITIES = {"NVDA", "ASML", "TSM", "AMD", "MSFT", "GOOGL"}
+CORE_CRYPTO = {"BTC", "ETH", "SOL", "BNB", "LINK"}
+HIGH_BETA_CRYPTO = {"DOGE", "SHIB", "TRX", "XRP", "AVAX"}
+DEFENSIVE_EQUITIES = {"MSFT", "AAPL", "GOOGL", "ASML"}
+
 
 @dataclass(frozen=True)
 class MarketDecision:
@@ -110,7 +115,13 @@ class MarketDecision:
         }
 
 
-def build_market_decision(*, text: str, intel_context: dict[str, Any] | None = None, latest_events: list[Any] | None = None) -> MarketDecision:
+def build_market_decision(
+    *,
+    text: str,
+    intel_context: dict[str, Any] | None = None,
+    latest_events: list[Any] | None = None,
+    profile_data: dict[str, Any] | None = None,
+) -> MarketDecision:
     normalized = _normalize(text)
     if not _is_market_decision_query(normalized):
         return MarketDecision()
@@ -120,6 +131,7 @@ def build_market_decision(*, text: str, intel_context: dict[str, Any] | None = N
         intel_context=intel_context,
         latest_events=latest_events,
         explicit_assets=_assets_in_text(normalized),
+        profile_data=profile_data,
     )
 
     if not candidate_scores:
@@ -176,6 +188,7 @@ def build_asset_signal_board(
     text: str,
     intel_context: dict[str, Any] | None = None,
     latest_events: list[Any] | None = None,
+    profile_data: dict[str, Any] | None = None,
     limit: int = 4,
 ) -> list[dict[str, Any]]:
     normalized = _normalize(text)
@@ -187,6 +200,7 @@ def build_asset_signal_board(
         intel_context=intel_context,
         latest_events=latest_events,
         explicit_assets=_assets_in_text(normalized),
+        profile_data=profile_data,
     )
     out: list[dict[str, Any]] = []
     for asset, score in sorted(candidate_scores.items(), key=lambda item: item[1], reverse=True)[: max(1, limit)]:
@@ -220,6 +234,7 @@ def _collect_market_candidates(
     intel_context: dict[str, Any] | None = None,
     latest_events: list[Any] | None = None,
     explicit_assets: list[str] | None = None,
+    profile_data: dict[str, Any] | None = None,
 ) -> tuple[dict[str, float], dict[str, list[str]], dict[str, list[str]], dict[str, list[str]]]:
     candidate_scores: dict[str, float] = {}
     candidate_reasons: dict[str, list[str]] = {}
@@ -260,6 +275,13 @@ def _collect_market_candidates(
             candidate_risks=candidate_risks,
             candidate_evidence=candidate_evidence,
         )
+    _apply_profile_bias(
+        scope=scope,
+        profile_data=profile_data,
+        candidate_scores=candidate_scores,
+        candidate_reasons=candidate_reasons,
+        candidate_risks=candidate_risks,
+    )
     return candidate_scores, candidate_reasons, candidate_risks, candidate_evidence
 
 
@@ -494,6 +516,93 @@ def _extract_relative_movers(text: str) -> list[dict[str, Any]]:
             asset = raw_asset.strip().upper()
             if asset in ASSET_ALIASES:
                 out.append({"asset": asset, "change_pct": 1.4 * sign})
+    return out
+
+
+def _apply_profile_bias(
+    *,
+    scope: str,
+    profile_data: dict[str, Any] | None,
+    candidate_scores: dict[str, float],
+    candidate_reasons: dict[str, list[str]],
+    candidate_risks: dict[str, list[str]],
+) -> None:
+    if not candidate_scores:
+        return
+    profile_data = dict(profile_data or {})
+    preferences = _keyword_set(profile_data.get("preferences") or [])
+    topics = _keyword_set(profile_data.get("topics") or [])
+    preferred_assets = _asset_preferences(profile_data.get("preferred_assets") or [])
+    avoid_assets = _asset_preferences(profile_data.get("avoid_assets") or [])
+    risk_mode = _risk_mode(profile_data)
+    merged = preferences | topics
+
+    for asset in list(candidate_scores):
+        bias = 0.0
+        if asset in preferred_assets:
+            bias += 0.32
+            candidate_reasons.setdefault(asset, []).append(f"{asset} senin acik tercih listende duruyor.")
+        if asset in avoid_assets:
+            bias -= 0.42
+            candidate_risks.setdefault(asset, []).append(f"{asset} senin kacindigin varliklar tarafinda.")
+
+        if scope == "equity" and AI_EQUITIES.__contains__(asset) and merged.intersection({"ai", "yapay zeka", "chip", "semiconductor"}):
+            bias += 0.14
+            candidate_reasons.setdefault(asset, []).append(f"{asset} AI/urun ilgine dogrudan temas ediyor.")
+        if scope == "crypto" and asset in CORE_CRYPTO and merged.intersection({"btc", "bitcoin", "kripto", "piyasa", "market"}):
+            bias += 0.12
+            candidate_reasons.setdefault(asset, []).append(f"{asset} senin odaklandigin piyasa ekseniyle daha uyumlu.")
+
+        if risk_mode == "conservative":
+            if asset in HIGH_BETA_CRYPTO:
+                bias -= 0.18
+                candidate_risks.setdefault(asset, []).append(f"{asset} senin risk disiplinine gore daha oynak kalabilir.")
+            if scope == "equity" and asset in DEFENSIVE_EQUITIES:
+                bias += 0.08
+        elif risk_mode == "aggressive":
+            if asset in HIGH_BETA_CRYPTO:
+                bias += 0.1
+            if scope == "equity" and asset in {"TSLA", "AMD"}:
+                bias += 0.08
+
+        candidate_scores[asset] = candidate_scores.get(asset, 0.0) + bias
+
+
+def _risk_mode(profile_data: dict[str, Any]) -> str:
+    blob = " ".join(
+        [
+            str(profile_data.get("risk_profile") or ""),
+            str(profile_data.get("risk_tolerance") or ""),
+            str(profile_data.get("investing_style") or ""),
+        ]
+    )
+    low = _normalize(blob)
+    if any(token in low for token in ("dusuk", "low", "conservative", "temkinli")):
+        return "conservative"
+    if any(token in low for token in ("yuksek", "high", "aggressive", "atak")):
+        return "aggressive"
+    return "balanced"
+
+
+def _keyword_set(values: list[Any]) -> set[str]:
+    out: set[str] = set()
+    for value in values:
+        low = _normalize(str(value or ""))
+        if not low:
+            continue
+        out.add(low)
+    return out
+
+
+def _asset_preferences(values: list[Any]) -> set[str]:
+    out: set[str] = set()
+    for value in values:
+        text = _normalize(str(value or ""))
+        if not text:
+            continue
+        for asset, aliases in ASSET_ALIASES.items():
+            if text == asset.lower() or text in aliases:
+                out.add(asset)
     return out
 
 

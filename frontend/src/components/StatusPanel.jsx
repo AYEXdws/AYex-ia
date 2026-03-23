@@ -17,6 +17,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
   const marketFocus = intelBrief?.market_focus || null;
   const domainFocus = intelBrief?.domain_focus || null;
   const liveInventory = intelBrief?.live_inventory?.feeds || null;
+  const personaFocus = intelBrief?.persona_focus || null;
   return (
     <motion.aside
       className="glass-card h-full w-full p-5 md:p-6"
@@ -90,6 +91,18 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
             reasons={marketFocus?.macro?.reasons}
           />
         </div>
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">KISISEL MOD</div>
+        <DecisionCard
+          label={personaFocus?.assistant_name || 'AYEX'}
+          summary={`Geri bildirim tonu: ${personaFocus?.feedback_style || 'net'}. Son cevap modu: ${insight?.response_mode || status?.mode || 'normal'}.`}
+          reasons={[
+            personaFocus?.focus_projects?.length ? `Odak projeler: ${personaFocus.focus_projects.join(', ')}` : '',
+            personaFocus?.preferred_categories?.length ? `Onceledigi alanlar: ${personaFocus.preferred_categories.join(', ')}` : '',
+          ].filter(Boolean)}
+        />
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">

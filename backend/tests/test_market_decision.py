@@ -126,6 +126,61 @@ def test_build_asset_signal_board_returns_ranked_assets():
     assert out[0]["reasons"]
 
 
+def test_market_decision_uses_profile_preference_as_light_tiebreaker():
+    latest_events = [
+        SimpleNamespace(
+            title="Kripto Piyasasi: BTC $70.91K | +3.10% (24s)",
+            summary="Top 5: BTC: $70.91K (+3.10%) | XRP: $1.46 (+3.05%). Tum coinler: BTC: $70.91K +3.10%, XRP: $1.46 +3.05%.",
+            tags=["kripto", "btc", "piyasa"],
+            importance=7,
+            final_score=0.67,
+            timestamp=datetime.utcnow(),
+        )
+    ]
+
+    out = build_market_decision(
+        text="1 ay icin hangi coin daha mantikli",
+        latest_events=latest_events,
+        profile_data={"topics": ["btc"], "preferences": ["kripto"]},
+    )
+
+    assert out.active is True
+    assert out.asset == "BTC"
+    assert any("odaklandigin piyasa ekseni" in item.lower() for item in out.reasons)
+
+
+def test_market_decision_penalizes_avoided_assets():
+    intel_context = {
+        "key_events": [
+            {
+                "title": "Tesla sees strong breakout",
+                "summary": "TSLA rally continues with fresh accumulation",
+                "tags": ["tsla", "market"],
+                "importance": 8,
+                "effective_score": 0.9,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+            {
+                "title": "ASML sees strong breakout",
+                "summary": "ASML rally continues with fresh accumulation",
+                "tags": ["asml", "market"],
+                "importance": 8,
+                "effective_score": 0.88,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        ]
+    }
+
+    out = build_market_decision(
+        text="1 ay icin hangi hisse daha mantikli",
+        intel_context=intel_context,
+        profile_data={"avoid_assets": ["tsla"], "preferences": ["yapay zeka"]},
+    )
+
+    assert out.active is True
+    assert out.asset == "ASML"
+
+
 def test_enforce_decision_reply_prepends_clear_headline():
     decision = {
         "active": True,

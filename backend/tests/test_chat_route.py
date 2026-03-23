@@ -319,6 +319,7 @@ def test_chat_skips_duplicate_cache_for_live_data_queries():
 def test_should_suppress_memory_for_current_state_queries():
     assert _should_suppress_memory("şuan elinde ki canlı veriler nelerdir")
     assert _should_suppress_memory("guncel makro tarafta ne oluyor")
+    assert _should_suppress_memory("1 ay icin hangi coin daha mantikli")
     assert not _should_suppress_memory("ayex projesi hakkinda ne dusunuyorsun")
 
 
