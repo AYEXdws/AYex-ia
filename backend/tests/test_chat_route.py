@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
-from backend.src.routes.chat import _format_all_events, chat
+from backend.src.routes.chat import _enforce_grounded_intel_reply, _format_all_events, chat
 from backend.src.schemas import ChatRequest
 
 
@@ -175,3 +175,30 @@ def test_format_all_events_respects_prompt_budget():
 
     assert len(text) <= 1200
     assert "prompt butcesi" in text or "EVENT" in text.upper()
+
+
+def test_enforce_grounded_intel_reply_replaces_false_no_data():
+    query_ctx = SimpleNamespace(
+        intel_context={
+            "key_events": [
+                {
+                    "title": "Makro Ozet: USD/TRY 44.34 | EUR/TRY 51.25",
+                    "summary": "USD/TRY 44.34 seviyesinde. EUR/TRY 51.25.",
+                },
+                {
+                    "title": "Hisse Senetleri: ASML +4.78% | TSLA +3.77%",
+                    "summary": "ASML ve TSLA guclu gorunuyor.",
+                },
+            ]
+        }
+    )
+
+    out = _enforce_grounded_intel_reply(
+        reply="Elimde gercek zamanli veri yok.",
+        query_ctx=query_ctx,
+        decision={"active": True, "summary": "Ahmet, su an en mantikli secenek ASML."},
+    )
+
+    assert "veri yok" not in out.lower()
+    assert "ASML" in out
+    assert "Makro Ozet" in out

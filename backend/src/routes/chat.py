@@ -20,6 +20,19 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+_NO_DATA_MARKERS = (
+    "veri yok",
+    "canli veri yok",
+    "gercek zamanli",
+    "feed yok",
+    "erisimim yok",
+    "erişimim yok",
+    "net fiyat su an elimde yok",
+    "elimde hisse piyasasina dair guncel veri yok",
+    "elimde gercek zamanli",
+)
+
+
 def _format_all_events(
     events: list[Any],
     *,
@@ -191,6 +204,57 @@ def _select_model_simple(
         allow_anthropic=allow_anthropic,
         allow_openai=allow_openai,
     )
+
+
+def _normalize_reply(text: str) -> str:
+    return " ".join(str(text or "").lower().split())
+
+
+def _should_force_grounded_reply(reply: str) -> bool:
+    low = _normalize_reply(reply)
+    return any(marker in low for marker in _NO_DATA_MARKERS)
+
+
+def _build_grounded_reply(*, query_ctx: Any, decision: dict[str, Any] | None = None) -> str:
+    row = dict(decision or {})
+    key_events = list(query_ctx.intel_context.get("key_events") or [])[:3]
+    if not key_events:
+        return ""
+    lines: list[str] = []
+    if row.get("active") and row.get("summary"):
+        lines.append(str(row.get("summary")).strip())
+    else:
+        lines.append("Elimde guncel veri var.")
+
+    first = key_events[0]
+    first_title = str(first.get("title") or "").strip()
+    first_summary = str(first.get("summary") or "").strip()
+    if first_title:
+        line = first_title
+        if first_summary:
+            line += f" {first_summary[:220]}"
+        lines.append(line)
+
+    if len(key_events) > 1:
+        tails = []
+        for item in key_events[1:3]:
+            title = str(item.get("title") or "").strip()
+            if title:
+                tails.append(title)
+        if tails:
+            lines.append("Bunu destekleyen diger sinyaller: " + " | ".join(tails))
+    return "\n\n".join([line for line in lines if line]).strip()
+
+
+def _enforce_grounded_intel_reply(*, reply: str, query_ctx: Any, decision: dict[str, Any] | None = None) -> str:
+    text = str(reply or "").strip()
+    key_events = list(query_ctx.intel_context.get("key_events") or [])
+    if not key_events:
+        return text
+    if not _should_force_grounded_reply(text):
+        return text
+    fallback = _build_grounded_reply(query_ctx=query_ctx, decision=decision)
+    return fallback or text
 
 
 def _maybe_trigger_memory_summary(services: BackendServices, session_id: str) -> None:
@@ -431,6 +495,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
     if not reply or len(reply) < 10:
         reply = "Bir sorun olustu, tekrar dene."
     reply = enforce_decision_reply(decision=decision, reply=reply)
+    reply = _enforce_grounded_intel_reply(reply=reply, query_ctx=query_ctx, decision=decision)
 
     latency_ms = int(getattr(result, "latency_ms", 0) or 0)
     source = str(getattr(result, "source", "") or "openai_direct")

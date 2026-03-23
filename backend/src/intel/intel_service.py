@@ -163,11 +163,28 @@ def _freshness_for_timestamp(ts: datetime) -> tuple[float, str, float]:
 
 def _topic_keywords() -> dict[str, tuple[str, ...]]:
     return {
-        "crypto": ("crypto", "kripto", "btc", "bitcoin", "eth", "ethereum", "altcoin", "stablecoin", "usdt"),
-        "market": ("market", "piyasa", "trading", "borsa", "fiyat", "price", "likidite", "liquidity"),
-        "economy": ("economy", "ekonomi", "enflasyon", "faiz", "fed", "rate", "cpi", "macro", "makro"),
-        "security": ("security", "guvenlik", "breach", "hack", "saldiri", "ihlal", "sizinti", "ransomware", "cyber"),
-        "global": ("global", "jeopolitik", "geopolitic", "savas", "war", "sanction", "ticaret", "trade"),
+        "crypto": ("crypto", "kripto", "btc", "bitcoin", "eth", "ethereum", "altcoin", "stablecoin", "usdt", "token", "coin"),
+        "market": (
+            "market",
+            "piyasa",
+            "trading",
+            "borsa",
+            "fiyat",
+            "price",
+            "likidite",
+            "liquidity",
+            "hisse",
+            "hisseler",
+            "stock",
+            "stocks",
+            "equity",
+            "equities",
+            "hisse senedi",
+            "senet",
+        ),
+        "economy": ("economy", "ekonomi", "enflasyon", "faiz", "fed", "rate", "cpi", "macro", "makro", "kur", "doviz", "forex"),
+        "security": ("security", "guvenlik", "breach", "hack", "saldiri", "ihlal", "sizinti", "ransomware", "cyber", "siber", "tehdit", "vuln"),
+        "global": ("global", "jeopolitik", "geopolitic", "savas", "war", "sanction", "ticaret", "trade", "dunya", "world", "iran", "israil", "ukrayna"),
         "company": ("company", "sirket", "earnings", "bilanco", "ceo", "kurumsal", "corporate"),
         "tech": ("tech", "teknoloji", "ai", "outage", "cloud", "infrastructure", "altyapi", "chip", "semiconductor"),
     }
@@ -271,7 +288,7 @@ def extract_query_topics(query: str) -> dict:
         "tech": "tech",
     }
     for topic, keywords in _topic_keywords().items():
-        if any(k in q_norm for k in keywords):
+        if any(_contains_keyword(q_norm, k) for k in keywords):
             topics.append(topic)
             mapped = topic_to_category.get(topic)
             if mapped and mapped not in category_bias:
@@ -417,9 +434,25 @@ def _event_topic_hits(event: IntelEvent, query_topics: list[str]) -> float:
     hits = 0
     for topic in query_topics:
         kws = keys.get(topic, ())
-        if any(k in blob_norm for k in kws):
+        if any(_contains_keyword(blob_norm, k) for k in kws):
             hits += 1
     return min(1.0, hits / max(1, len(query_topics)))
+
+
+def _source_query_boost(source: str, query_topics: list[str], query_categories: set[str]) -> float:
+    src = _normalize_text(source).strip()
+    boost = 0.0
+    if src == "coingecko" and "crypto" in query_topics:
+        boost += 0.28
+    if src == "yahoo_finance" and ("market" in query_topics or "economy" in query_topics):
+        boost += 0.24
+    if src == "er_api" and "economy" in query_topics:
+        boost += 0.24
+    if src == "the_hacker_news" and "security" in query_categories:
+        boost += 0.28
+    if src in {"bbc_world", "reuters"} and "global" in query_categories:
+        boost += 0.24
+    return boost
 
 
 def _is_noise_event(event: IntelEvent) -> bool:
@@ -1300,7 +1333,8 @@ def select_relevant_intel_context(
 
         topic_hit = _event_topic_hits(event, query_topics)
         category_bias_boost = 0.15 if query_categories and _normalize_text(event.category) in query_categories else 0.0
-        query_match_score = min(1.0, (overlap_norm * 0.72) + (topic_hit * 0.28) + category_bias_boost)
+        source_boost = _source_query_boost(str(getattr(event, "source", "") or ""), query_topics, query_categories)
+        query_match_score = min(1.0, (overlap_norm * 0.60) + (topic_hit * 0.25) + category_bias_boost + source_boost)
 
         event_cat = _normalize_text(event.category)
         if query_categories and event_cat not in query_categories and topic_hit <= 0.0 and overlap_raw <= 0.0:
