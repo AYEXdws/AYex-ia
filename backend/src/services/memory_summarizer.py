@@ -167,6 +167,10 @@ class MemorySummarizer:
                 self._save_pending(pending)
         return successful
 
+    def retry_queue_size(self) -> int:
+        with self._lock:
+            return len(self._load_pending())
+
     def search_memories(self, query: str, limit: int = 5) -> list:
         q_tokens = self._extract_keywords(query, limit=10)
         if not q_tokens:

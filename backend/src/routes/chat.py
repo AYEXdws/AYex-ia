@@ -11,7 +11,7 @@ from backend.src.routes.deps import get_services
 from backend.src.schemas import ChatRequest, ChatResponse
 from backend.src.services.container import BackendServices
 from backend.src.services.model_router import ModelSelection
-from backend.src.utils.logging import get_logger
+from backend.src.utils.logging import get_logger, log_event
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -261,7 +261,9 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         return ChatResponse(reply="Bos mesaj gonderilemez.", session_id=payload.session_id or "", metrics={"ok": False})
 
     user_id = str(getattr(request.state, "user_id", "ayex"))
+    request_id = str(getattr(request.state, "request_id", ""))
     ai_source = "model_direct"
+    log_event(logger, "chat_start", request_id=request_id, user_id=user_id, text_len=len(text))
 
     guard = services.cost_guard.check_and_track(text)
     if not guard.ok:
@@ -419,6 +421,17 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         logger.info("CHAT_LONG_MEMORY_FAIL error=%s", exc)
 
     _maybe_trigger_memory_summary(services, session.id)
+    log_event(
+        logger,
+        "chat_result",
+        request_id=request_id,
+        user_id=user_id,
+        session_id=session.id,
+        model=used_model,
+        source=source,
+        latency_ms=latency_ms,
+        event_count=event_count,
+    )
 
     return ChatResponse(
         reply=reply,

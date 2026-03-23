@@ -1,41 +1,33 @@
 # Request Flow
 
-## End-to-end voice path
+Ayrintili versiyon icin `README.md` kullanilir. Bu dosya sadece hizli ozet.
 
-1. User speaks
-2. ESP32 records PCM16 frames (24 kHz mono)
-3. ESP32 sends WAV payload to backend (`POST /voice/turn` or `POST /audio`)
-4. Backend STT service transcribes audio
-5. Backend intent router classifies request:
-   - `simple_command`
-   - `question`
-   - `conversation`
-   - `memory_request`
-   - `future_device_action`
-6. Tool router handles cheap commands when possible (no expensive LLM call)
-7. Fallback/normal path uses AYEX voice response logic + memory context
-8. Backend TTS service generates WAV audio reply
-9. Backend returns playable WAV bytes to ESP32
-10. ESP32 parses WAV and streams PCM to MAX98357/speaker
+## Text Flow (`/chat`)
 
-## HTTP routes
+1. `RequestMetricsMiddleware` request id ve latency takip eder.
+2. `AuthMiddleware` korumali endpointlerde bearer token dogrular.
+3. `routes/chat.py` guard + session + intel + memory context olusturur.
+4. `ModelService` secilen modele gore OpenAI/Anthropic cagrisi yapar.
+5. Sonuc `ChatStore` ve `LongMemory` katmanina yazilir.
+6. Memory summary arka planda uretilir, basarisizsa retry queue'ya alinır.
 
-- `GET /health`
-- `POST /chat` (text in, text out)
-- `POST /audio` (multipart audio in, wav out)
-- `POST /voice/turn` (compatibility alias for existing ESP32)
-- `POST /tts` (text in, wav out)
-- `POST /event` (reserved for future sensor/event ingress)
+## Ingest Flow (`/events/ingest`)
 
-## Current ESP32 audio request format
+1. Opsiyonel ingest token kontrolu
+2. RPM rate limit kontrolu
+3. Payload validate (`IntelService.validate_event_payload`)
+4. Event score + persist + archive
+5. Long memory event append
 
-Multipart fields currently expected by backend:
+## Audio Flow (`/audio`, `/voice/turn`)
 
-- `workspace` (string, optional)
-- `voice` (string, optional; default: `alloy`)
-- `audio` (WAV file)
+1. WAV upload
+2. STT
+3. Intent + model routing
+4. TTS
+5. WAV response
 
-Response:
+## Operational Headers
 
-- `Content-Type: audio/wav`
-- headers: `X-Transcript`, `X-Reply`, `X-Intent`
+- `x-request-id`
+- `x-response-time-ms`

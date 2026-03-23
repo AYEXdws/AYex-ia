@@ -26,7 +26,7 @@ from backend.src.services.tool_router import ToolRouter
 from backend.src.services.tts_service import TextToSpeechService
 from backend.src.services.voice_response import VoiceResponseService
 from backend.src.tools.registry import ToolRegistry
-from backend.src.utils.logging import get_logger
+from backend.src.utils.logging import get_logger, log_event
 
 logger = get_logger(__name__)
 
@@ -57,9 +57,9 @@ def build_services() -> BackendServices:
     settings = load_settings()
     openai_primary = (os.environ.get("OPENAI_API_KEY") or "").strip()
     openai_legacy = (os.environ.get("AYEX_API_KEY") or "").strip()
-    logger.info("CONFIG_MODE direct_provider_path=true")
+    log_event(logger, "bootstrap_start", mode="direct_provider_path", web_mvp_only=settings.web_mvp_only)
     if openai_primary:
-        logger.info("OPENAI_KEY_SOURCE OPENAI_API_KEY")
+        log_event(logger, "openai_key_source", source="OPENAI_API_KEY")
     elif openai_legacy:
         logger.warning("OPENAI_KEY_SOURCE AYEX_API_KEY (legacy fallback)")
     else:
@@ -76,7 +76,7 @@ def build_services() -> BackendServices:
     if settings.anthropic_api_key:
         try:
             anthropic_client = AnthropicClient(api_key=settings.anthropic_api_key)
-            logger.info("ANTHROPIC_CLIENT initialized")
+            log_event(logger, "anthropic_client", status="initialized")
         except Exception as e:
             logger.warning("ANTHROPIC_CLIENT_FAILED error=%s", str(e))
     model_service = ModelService(settings, anthropic_client=anthropic_client)
@@ -98,6 +98,16 @@ def build_services() -> BackendServices:
         tool_router=tools,
         voice_response_service=voice,
         model_service=model_service,
+    )
+    log_event(
+        logger,
+        "bootstrap_ready",
+        chat_model=settings.ayex_chat_model,
+        reasoning_model=settings.ayex_reasoning_model,
+        power_model=settings.ayex_power_model,
+        fast_model=settings.ayex_fast_model,
+        intel_prompt_max_events=settings.intel_prompt_max_events,
+        intel_prompt_max_chars=settings.intel_prompt_max_chars,
     )
     return BackendServices(
         settings=settings,

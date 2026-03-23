@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from backend.src.routes.deps import get_services
 from backend.src.services.container import BackendServices
-from backend.src.utils.logging import get_logger
+from backend.src.utils.logging import get_logger, log_event
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -47,20 +47,24 @@ def latest_events(
 @router.post("/events/ingest")
 async def ingest_event(request: Request, services: BackendServices = Depends(get_services)) -> dict:
     user_id = str(getattr(request.state, "user_id", "default"))
+    request_id = str(getattr(request.state, "request_id", ""))
     expected_token = str(getattr(services.settings, "intel_ingest_token", "") or "").strip()
     if expected_token:
         provided = (request.headers.get("x-ayex-ingest-token") or request.headers.get("x-intel-token") or "").strip()
         if not provided or not hmac.compare_digest(provided, expected_token):
             logger.info("EVENT_REJECTED reason=ingest_token_invalid")
+            log_event(logger, "events_ingest_rejected", request_id=request_id, reason="unauthorized", user_id=user_id)
             return {"status": "skipped", "reason": "unauthorized"}
 
     try:
         body = await request.json()
         if not isinstance(body, dict):
             logger.info("EVENT_REJECTED reason=invalid_json_type")
+            log_event(logger, "events_ingest_rejected", request_id=request_id, reason="invalid_json_type", user_id=user_id)
             return {"status": "skipped", "reason": "invalid"}
     except Exception:
         logger.info("EVENT_REJECTED reason=invalid_json_parse")
+        log_event(logger, "events_ingest_rejected", request_id=request_id, reason="invalid_json_parse", user_id=user_id)
         return {"status": "skipped", "reason": "invalid"}
 
     # Backward-compatible: allow legacy payload wrapper {type, payload:{...}}
@@ -83,6 +87,7 @@ async def ingest_event(request: Request, services: BackendServices = Depends(get
                 bucket.popleft()
             if len(bucket) >= limit_per_minute:
                 logger.info("EVENT_REJECTED reason=rate_limited key=%s rpm=%s", rate_key, limit_per_minute)
+                log_event(logger, "events_ingest_rejected", request_id=request_id, reason="rate_limited", key=rate_key, rpm=limit_per_minute)
                 return {"status": "skipped", "reason": "rate_limited"}
             bucket.append(now)
 
@@ -97,6 +102,7 @@ async def ingest_event(request: Request, services: BackendServices = Depends(get
         )
     except Exception as exc:
         logger.info("EVENT_REJECTED reason=invalid error=%s", exc)
+        log_event(logger, "events_ingest_rejected", request_id=request_id, reason="invalid_payload", error=exc)
         return {"status": "skipped", "reason": "invalid"}
 
     created = services.intel.create_event(
@@ -110,6 +116,7 @@ async def ingest_event(request: Request, services: BackendServices = Depends(get
     )
     if created is None:
         logger.info("EVENT_REJECTED reason=duplicate title=%s", cleaned["title"])
+        log_event(logger, "events_ingest_rejected", request_id=request_id, reason="duplicate", title=cleaned["title"])
         return {"status": "skipped", "reason": "duplicate"}
 
     services.long_memory.append_event(
@@ -127,4 +134,13 @@ async def ingest_event(request: Request, services: BackendServices = Depends(get
         user_id=user_id,
     )
     logger.info("EVENT_STORED id=%s title=%s score=%s", created.id, created.title, created.final_score)
+    log_event(
+        logger,
+        "events_ingest_stored",
+        request_id=request_id,
+        id=created.id,
+        title=created.title,
+        category=cleaned["category"],
+        source=cleaned["source"],
+    )
     return {"status": "ok", "stored": True}

@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.src.middleware.auth_middleware import AuthMiddleware
+from backend.src.middleware.request_metrics import RequestMetricsMiddleware
 from backend.src.routes.action import router as action_router
 from backend.src.routes.auth import router as auth_router
 from backend.src.routes.chat import router as chat_router
@@ -17,7 +18,7 @@ from backend.src.routes.intel import router as intel_router
 from backend.src.routes.profile import router as profile_router
 from backend.src.routes.usage import router as usage_router
 from backend.src.services.container import build_services
-from backend.src.utils.logging import get_logger
+from backend.src.utils.logging import get_logger, log_event
 
 logger = get_logger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -26,8 +27,16 @@ FRONTEND_INDEX = FRONTEND_DIST / "index.html"
 API_PREFIXES = ("/auth", "/chat", "/action", "/events", "/health", "/sessions", "/profile", "/usage", "/audio", "/voice", "/tts", "/event", "/intel")
 
 app = FastAPI(title="AYEX Backend", version="0.2.0")
+app.add_middleware(RequestMetricsMiddleware)
 app.add_middleware(AuthMiddleware)
 app.state.services = build_services()
+log_event(
+    logger,
+    "app_init",
+    version="0.2.0",
+    web_mvp_only=app.state.services.settings.web_mvp_only,
+    frontend_dist_exists=FRONTEND_DIST.exists(),
+)
 
 app.include_router(health_router)
 app.include_router(auth_router)

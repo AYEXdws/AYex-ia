@@ -27,6 +27,18 @@ services:
         value: "45"
       - key: AYEX_MODEL_CACHE_SIZE
         value: "128"
+      - key: AYEX_INTEL_PROMPT_MAX_EVENTS
+        value: "20"
+      - key: AYEX_INTEL_PROMPT_MAX_CHARS
+        value: "4200"
+      - key: AYEX_INTEL_INGEST_RPM
+        value: "120"
+      - key: AYEX_INTEL_INGEST_TOKEN
+        sync: false
+      - key: AYEX_LOG_LEVEL
+        value: "INFO"
+      - key: AYEX_OPENAI_TIMEOUT_SEC
+        value: "45"
       - key: AYEX_DAILY_REQUEST_LIMIT
         value: "350"
       - key: AYEX_DAILY_INPUT_CHAR_LIMIT
