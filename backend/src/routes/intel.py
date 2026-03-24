@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
 
-from backend.src.intel.intel_service import select_relevant_intel_context
+from backend.src.intel.intel_service import _is_low_signal_world_event, select_relevant_intel_context
 from backend.src.routes.deps import get_services
 from backend.src.services.container import BackendServices
 from backend.src.services.decision_history import build_recent_decisions
@@ -88,7 +88,7 @@ def public_intel(services: BackendServices = Depends(get_services)) -> dict:
         "brand": "AYEXDWS",
         "updated_at": updated_at,
         "overview": _build_public_overview(sections=sections, updated_at=updated_at),
-        "pulse": _build_public_pulse(market_focus=market_focus, domain_focus=domain_focus),
+        "pulse": _build_public_pulse(sections=sections, market_focus=market_focus),
         "changed_today": _build_public_changed_today(sections),
         "sections": sections,
     }
@@ -254,7 +254,10 @@ def _build_public_sections(*, inventory_events: list, market_focus: dict, domain
         curated = [event for event in matching if _is_publishable_public_event(event, key=key)]
         focus = _select_public_focus(key=key, market_focus=market_focus, domain_focus=domain_focus)
         feed_meta = dict((live_inventory.get("feeds") or {}).get(key) or {})
-        lead_event = curated[0] if curated else (matching[0] if matching else None)
+        lead_event = curated[0] if curated else None
+        summary = str(focus.get("summary") or "").strip()
+        if key in {"world", "cyber"} and lead_event is not None:
+            summary = str(getattr(lead_event, "summary", "") or "").strip() or summary
         sections.append(
             {
                 "key": key,
@@ -263,7 +266,7 @@ def _build_public_sections(*, inventory_events: list, market_focus: dict, domain
                 "freshness_state": str(feed_meta.get("freshness_state") or "unknown"),
                 "count_24h": int(feed_meta.get("count_24h") or 0),
                 "published_count": len(curated),
-                "summary": focus.get("summary") or feed_meta.get("summary") or f"{label} akisi icin sinyal yok.",
+                "summary": summary or feed_meta.get("summary") or f"{label} akisi icin sinyal yok.",
                 "signal": focus.get("signal") or feed_meta.get("signal") or "unknown",
                 "reasons": list(focus.get("reasons") or [])[:2],
                 "headline": str(getattr(lead_event, "title", "") or "").strip() if lead_event else f"{label} akisi icin son event yok.",
@@ -302,8 +305,9 @@ def _build_public_overview(*, sections: list[dict], updated_at: str) -> dict:
     }
 
 
-def _build_public_pulse(*, market_focus: dict, domain_focus: dict) -> list[dict]:
+def _build_public_pulse(*, sections: list[dict], market_focus: dict) -> list[dict]:
     pulse: list[dict] = []
+    section_map = {str(section.get("key") or ""): dict(section) for section in sections}
     for key, label in (("crypto", "Kripto"), ("equities", "Hisse"), ("macro", "Makro")):
         row = dict((market_focus or {}).get(key) or {})
         if not row:
@@ -316,12 +320,12 @@ def _build_public_pulse(*, market_focus: dict, domain_focus: dict) -> list[dict]
             }
         )
     for key, label in (("world", "World"), ("cyber", "Cyber")):
-        row = dict((domain_focus or {}).get(key) or {})
+        row = section_map.get(key) or {}
         pulse.append(
             {
                 "label": label,
                 "summary": str(row.get("summary") or "").strip() or f"{label} sinyali hazir.",
-                "signal": str(row.get("signal") or "watch"),
+                "signal": str(row.get("signal") or row.get("freshness_state") or "watch"),
             }
         )
     return pulse[:5]
@@ -379,6 +383,19 @@ def _is_publishable_public_event(event, *, key: str) -> bool:
         return False
     if age_hours is not None and age_hours > max_age_hours:
         return False
+    if key == "world":
+        title = str(getattr(event, "title", "") or "").strip()
+        summary = str(getattr(event, "summary", "") or "").strip()
+        source = str(getattr(event, "source", "") or "").strip().lower()
+        category = str(getattr(event, "category", "") or "").strip().lower()
+        if _is_low_signal_world_event(
+            source=source,
+            title=title,
+            summary=summary,
+            importance=importance,
+            category=category,
+        ):
+            return False
     return True
 
 

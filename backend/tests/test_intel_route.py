@@ -44,6 +44,28 @@ class _FakeIntel:
                 confidence_score=0.75,
             ),
             IntelEvent(
+                title="The alarming civilian cost of war in Iran grows as families flee",
+                summary="A profile-style story focused on families, civilians and the human toll of war.",
+                category="global",
+                importance=8,
+                source="bbc_world",
+                tags=["war", "civilian"],
+                timestamp=datetime.utcnow() - timedelta(hours=4),
+                final_score=0.72,
+                confidence_score=0.7,
+            ),
+            IntelEvent(
+                title="Iranian missiles injure 180 in towns near Israeli nuclear site",
+                summary="Israel is investigating how ballistic missiles got through the country's sophisticated air defences.",
+                category="global",
+                importance=8,
+                source="bbc_world",
+                tags=["missile", "nuclear", "global"],
+                timestamp=datetime.utcnow() - timedelta(hours=3),
+                final_score=0.79,
+                confidence_score=0.73,
+            ),
+            IntelEvent(
                 title="Oracle Patches Critical CVE-2026-21992",
                 summary="Critical RCE yamasi yayinlandi.",
                 category="security",
@@ -137,7 +159,8 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["market_focus"]["macro"]["active"] is True
     assert "Makro Ozet" in payload["market_focus"]["macro"]["summary"]
     assert payload["market_focus"]["macro"]["metrics"]["usdtry"] == "44.34"
-    assert payload["domain_focus"]["world"]["active"] is False
+    assert payload["domain_focus"]["world"]["active"] is True
+    assert payload["domain_focus"]["world"]["source"] == "bbc_world"
     assert payload["domain_focus"]["cyber"]["available"] is True
     assert payload["domain_focus"]["cyber"]["freshness_state"] == "fresh"
     assert payload["domain_focus"]["cyber"]["source"] in {"bleeping_computer", "dark_reading"}
@@ -167,4 +190,7 @@ def test_public_intel_exposes_curated_sections():
     assert sections["crypto"]["items"]
     assert sections["equities"]["items"]
     assert sections["macro"]["items"]
+    assert sections["world"]["items"]
     assert sections["cyber"]["items"]
+    assert "civilian cost of war" not in sections["world"]["headline"].lower()
+    assert all("civilian cost of war" not in item["title"].lower() for item in sections["world"]["items"])
