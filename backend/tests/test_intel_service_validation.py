@@ -113,10 +113,10 @@ def test_validate_event_payload_rejects_low_importance_human_interest_world_news
 def test_validate_event_payload_does_not_misclassify_claims_as_ai():
     service = _service()
     payload = {
-        "title": "Kenyan ex-foreign minister arrested and accused of staging his disappearance",
-        "summary": "The reported disappearance of Raphael Tuju had led to claims he may have been abducted.",
+        "title": "Kenyan election claims trigger parliament vote on coalition future",
+        "summary": "Election claims escalated into a formal parliament vote over the ruling coalition's survival.",
         "category": "tech",
-        "importance": 6,
+        "importance": 8,
         "source": "bbc_world",
         "tags": ["dunya", "haber", "gundem"],
     }
@@ -162,6 +162,21 @@ def test_validate_event_payload_rejects_soft_conflict_story_without_hard_strateg
     payload = {
         "title": "The alarming civilian cost of war in Iran grows as families flee",
         "summary": "A human-focused report about civilian toll and family displacement, without a new military, sanctions or energy development.",
+        "category": "global",
+        "importance": 8,
+        "source": "bbc_world",
+        "tags": ["world"],
+    }
+
+    with pytest.raises(ValueError, match="low_signal_event"):
+        service.validate_event_payload(payload)
+
+
+def test_validate_event_payload_rejects_soft_political_profile_story_without_major_signal():
+    service = _service()
+    payload = {
+        "title": "President meets grieving families as civilian toll rises after overnight clashes",
+        "summary": "A profile-led report focused on family accounts and civilian cost, without any strategic military, sanctions, trade or energy development.",
         "category": "global",
         "importance": 8,
         "source": "bbc_world",

@@ -55,7 +55,13 @@ def intel_brief(request: Request, services: BackendServices = Depends(get_servic
         "domain_focus": _build_domain_focus(inventory_events),
         "live_inventory": build_live_inventory(inventory_events),
         "persona_focus": _build_persona_focus(profile_data),
-        "decision_history": build_recent_decisions(getattr(services, "chat_store", None), limit=6, sessions_window=18),
+        "decision_history": build_recent_decisions(
+            getattr(services, "chat_store", None),
+            latest_events=latest_events,
+            profile_data=profile_data,
+            limit=6,
+            sessions_window=18,
+        ),
     }
 
 

@@ -275,6 +275,15 @@ def _collect_market_candidates(
             candidate_risks=candidate_risks,
             candidate_evidence=candidate_evidence,
         )
+    _apply_crypto_market_regime(
+        scope=scope,
+        intel_context=intel_context,
+        latest_events=latest_events,
+        candidate_scores=candidate_scores,
+        candidate_reasons=candidate_reasons,
+        candidate_risks=candidate_risks,
+        candidate_evidence=candidate_evidence,
+    )
     _apply_profile_bias(
         scope=scope,
         profile_data=profile_data,
@@ -283,6 +292,81 @@ def _collect_market_candidates(
         candidate_risks=candidate_risks,
     )
     return candidate_scores, candidate_reasons, candidate_risks, candidate_evidence
+
+
+def _apply_crypto_market_regime(
+    *,
+    scope: str,
+    intel_context: dict[str, Any] | None,
+    latest_events: list[Any] | None,
+    candidate_scores: dict[str, float],
+    candidate_reasons: dict[str, list[str]],
+    candidate_risks: dict[str, list[str]],
+    candidate_evidence: dict[str, list[str]],
+) -> None:
+    if scope not in {"crypto", "all"}:
+        return
+
+    blobs: list[str] = []
+    for item in list((intel_context or {}).get("key_events") or []):
+        if not isinstance(item, dict):
+            continue
+        blobs.append(" ".join([str(item.get("title") or ""), str(item.get("summary") or ""), " ".join(item.get("tags") or [])]))
+    for event in list(latest_events or [])[:10]:
+        source = str(getattr(event, "source", "") or "").strip().lower()
+        tags = [str(tag).strip().lower() for tag in (getattr(event, "tags", []) or []) if str(tag).strip()]
+        if source != "coingecko" and "kripto" not in tags and "btc" not in tags:
+            continue
+        blobs.append(" ".join([str(getattr(event, "title", "") or ""), str(getattr(event, "summary", "") or ""), " ".join(tags)]))
+
+    if not blobs:
+        return
+
+    merged = _normalize(" ".join(blobs))
+    fear_score, fear_label = _extract_fear_greed(merged)
+    btc_dominance = _extract_btc_dominance(merged)
+
+    if fear_score is not None and fear_score <= 12:
+        for asset, bonus in {"BTC": 0.22, "ETH": 0.16, "SOL": 0.1, "LINK": 0.08}.items():
+            candidate_scores[asset] = candidate_scores.get(asset, 0.0) + bonus
+            candidate_reasons.setdefault(asset, []).append(f"Fear&Greed {fear_label} seviyesinde; bu ortamda {asset} digerlerine gore daha dayanıklı duruyor.")
+        for asset, penalty in {"SHIB": 0.22, "DOGE": 0.16, "TRX": 0.12}.items():
+            if asset not in candidate_scores:
+                continue
+            candidate_scores[asset] = candidate_scores.get(asset, 0.0) - penalty
+            candidate_risks.setdefault(asset, []).append(f"Fear&Greed {fear_label}; {asset} gibi yuksek beta coinlerde kirilganlik artabilir.")
+        candidate_evidence.setdefault("BTC", []).append(f"Fear&Greed: {fear_label}")
+
+    if btc_dominance is not None and btc_dominance >= 70.0:
+        for asset, bonus in {"BTC": 0.2, "ETH": 0.12, "SOL": 0.06}.items():
+            candidate_scores[asset] = candidate_scores.get(asset, 0.0) + bonus
+            candidate_reasons.setdefault(asset, []).append(f"BTC dominance {btc_dominance:.1f}% seviyesinde; piyasa liderligi daha cekirdek varliklara kayiyor.")
+        for asset, penalty in {"SHIB": 0.16, "DOGE": 0.12, "TRX": 0.08}.items():
+            if asset not in candidate_scores:
+                continue
+            candidate_scores[asset] = candidate_scores.get(asset, 0.0) - penalty
+            candidate_risks.setdefault(asset, []).append(f"BTC dominance {btc_dominance:.1f}% iken spekulatif coinler ikinci planda kalabilir.")
+        candidate_evidence.setdefault("BTC", []).append(f"BTC dominance: {btc_dominance:.1f}%")
+
+
+def _extract_fear_greed(text: str) -> tuple[float | None, str]:
+    label_match = re.search(r"fear\s*&\s*greed\s*:\s*([a-z ]+)\s*\((\d+(?:\.\d+)?)\)", text, flags=re.IGNORECASE)
+    if label_match:
+        return float(label_match.group(2)), label_match.group(1).strip()
+    score_match = re.search(r"fear\s*&\s*greed[^0-9]{0,10}(\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
+    if score_match:
+        return float(score_match.group(1)), "unknown"
+    return None, ""
+
+
+def _extract_btc_dominance(text: str) -> float | None:
+    match = re.search(r"btc dominance\s*:\s*(\d+(?:\.\d+)?)%", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
 
 
 def build_decision_prompt_block(decision: dict[str, Any] | None) -> str:

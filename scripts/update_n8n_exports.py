@@ -201,8 +201,8 @@ const lowSignal = [
 
 const hardStrategicMarkers = ['troops', 'ground invasion', 'missile', 'ballistic', 'hezbollah', 'nuclear', 'border', 'sanction', 'tariff', 'trade', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'ceasefire', 'drone', 'air strike', 'hostage', 'shipping', 'red sea', 'refinery'];
 const softConflictMarkers = ['war', 'conflict', 'attack', 'civilian', 'civilians', 'toll', 'killed'];
-const politicalMarkers = ['election', 'president', 'prime minister', 'government', 'parliament', 'minister', 'cabinet', 'coalition'];
-const economicMarkers = ['trade', 'tariff', 'sanction', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'workers', 'inflation', 'gdp', 'bank'];
+const politicalMarkers = ['election', 'vote', 'poll', 'snap election', 'coalition', 'parliament vote', 'cabinet collapse'];
+const economicMarkers = ['trade', 'tariff', 'sanction', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'shipping', 'red sea', 'refinery'];
 
 const tagRules = [
   ['war', ['war', 'conflict', 'troops', 'ground invasion']],
@@ -231,7 +231,7 @@ const pickCategory = (text) => {
 const pickImportance = (text) => {
   if (['breaking', 'urgent', 'crisis', 'emergency'].some((marker) => has(text, marker))) return 9;
   if (['missile', 'nuclear', 'hezbollah', 'ground invasion', 'ballistic', 'sanction', 'tariff', 'oil', 'gas', 'energy', 'blackout', 'power grid'].some((marker) => has(text, marker))) return 8;
-  if (['election', 'president', 'prime minister', 'government', 'trade', 'sanctions', 'tariff', 'blackout', 'power grid'].some((marker) => has(text, marker))) return 7;
+  if (['election', 'vote', 'poll', 'trade', 'sanctions', 'tariff', 'blackout', 'power grid', 'shipping', 'red sea'].some((marker) => has(text, marker))) return 7;
   return 6;
 };
 
@@ -278,7 +278,7 @@ const rows = items
   .filter((row) => row.title && row.summary && row.summary.length >= 70)
   .filter((row) => !row.profileLike)
   .filter((row) => row.importance >= 8)
-  .filter((row) => row.strategic || row.economic)
+  .filter((row) => row.strategic || row.economic || row.political)
   .filter((row) => !(row.softConflict && !row.strategic && !row.economic))
   .sort((a, b) => b.score - a.score || new Date(b.isoDate).getTime() - new Date(a.isoDate).getTime())
   .slice(0, 1);
@@ -531,7 +531,7 @@ def main() -> None:
             elif filename == "World News Feed v1.json" and node.get("name") == "Onem Esigi":
                 node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 8
             elif filename == "World News Feed v1.json" and node.get("name") == "Schedule Trigger":
-                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 120
+                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 180
             elif filename == "Macro Economy Feed v1.json" and node.get("name") == "Schedule Trigger":
                 node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
         remove_login_and_rewire(doc)

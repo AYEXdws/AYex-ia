@@ -268,7 +268,9 @@ function DecisionHistoryRow({ row }) {
   const reasons = Array.isArray(row?.reasons) ? row.reasons.slice(0, 1) : [];
   const session = row?.session_title || 'Oturum';
   const age = row?.age_label || 'unknown';
-  const status = row?.status || 'unknown';
+  const status = row?.outcome_status || row?.status || 'unknown';
+  const ageStatus = row?.age_status || 'unknown';
+  const outcomeNote = row?.outcome_note || '';
   return (
     <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3">
       <div className="flex items-center justify-between gap-3">
@@ -277,10 +279,11 @@ function DecisionHistoryRow({ row }) {
       </div>
       <div className="mt-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
         <span>{status}</span>
-        <span>{age}</span>
+        <span>{ageStatus} · {age}</span>
       </div>
       <div className="mt-2 text-sm leading-6 text-[var(--text)]">{summary}</div>
       {reasons.length ? <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{reasons[0]}</div> : null}
+      {outcomeNote ? <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{outcomeNote}</div> : null}
     </div>
   );
 }

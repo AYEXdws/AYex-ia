@@ -126,6 +126,29 @@ def test_build_asset_signal_board_returns_ranked_assets():
     assert out[0]["reasons"]
 
 
+def test_market_decision_uses_crypto_regime_bias_for_core_assets():
+    latest_events = [
+        SimpleNamespace(
+            title="Kripto Piyasasi: BTC $70.91K | +2.96% (24s)",
+            summary=(
+                "Top 5: BTC: $70.91K (+2.96%) | ETH: $2.16K (+4.09%) | SOL: $91.20 (+4.46%) | "
+                "BNB: $643.38 (+2.04%) | XRP: $1.46 (+4.55%). Fear&Greed: Extreme Fear (8). "
+                "BTC dominance: 71.2%. En cok yukselen: SHIB +5.66%."
+            ),
+            tags=["kripto", "btc", "piyasa"],
+            importance=8,
+            final_score=0.71,
+            timestamp=datetime.utcnow(),
+        )
+    ]
+
+    board = build_asset_signal_board(text="1 ay icin hangi coin daha mantikli", latest_events=latest_events, limit=4)
+
+    assert any(row["asset"] == "BTC" for row in board)
+    btc_row = next(row for row in board if row["asset"] == "BTC")
+    assert any("btc dominance" in item.lower() or "fear&greed" in item.lower() for item in btc_row["reasons"])
+
+
 def test_market_decision_uses_profile_preference_as_light_tiebreaker():
     latest_events = [
         SimpleNamespace(

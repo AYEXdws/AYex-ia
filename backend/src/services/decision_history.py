@@ -3,8 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from backend.src.services.market_decision import CRYPTO_ASSETS, EQUITY_ASSETS, build_asset_signal_board
 
-def build_recent_decisions(chat_store: Any, *, limit: int = 6, sessions_window: int = 18) -> list[dict[str, Any]]:
+
+def build_recent_decisions(
+    chat_store: Any,
+    *,
+    latest_events: list[Any] | None = None,
+    profile_data: dict[str, Any] | None = None,
+    limit: int = 6,
+    sessions_window: int = 18,
+) -> list[dict[str, Any]]:
     if not chat_store:
         return []
 
@@ -36,11 +45,17 @@ def build_recent_decisions(chat_store: Any, *, limit: int = 6, sessions_window: 
             if len(rows) >= max(1, min(20, limit * 2)):
                 break
 
+    signal_map = _build_current_signal_map(latest_events=latest_events, profile_data=profile_data)
     rows.sort(key=lambda item: item.get("_sort_ts", ""), reverse=True)
     out: list[dict[str, Any]] = []
     for item in rows[: max(1, min(20, limit))]:
         clean = dict(item)
         clean.pop("_sort_ts", None)
+        age_status = str(clean.get("age_status") or "unknown").strip() or "unknown"
+        outcome_status, outcome_note = _evaluate_outcome(clean, signal_map)
+        clean["outcome_status"] = outcome_status
+        clean["outcome_note"] = outcome_note
+        clean["status"] = outcome_status if outcome_status != "unknown" else age_status
         out.append(clean)
     return out
 
@@ -69,6 +84,7 @@ def _decision_row(*, message: dict[str, Any], session_id: str, session_title: st
         "session_title": session_title,
         "timestamp": iso_ts,
         "age_label": _age_label(iso_ts),
+        "age_status": _status_for_decision(iso_ts),
         "status": _status_for_decision(iso_ts),
         "response_mode": response_mode or "decision",
         "asset": asset,
@@ -128,3 +144,45 @@ def _status_for_decision(value: str) -> str:
     if age_hours < 168:
         return "izlenmeli"
     return "arsiv"
+
+
+def _build_current_signal_map(*, latest_events: list[Any] | None, profile_data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    latest_events = list(latest_events or [])
+    profile_data = dict(profile_data or {})
+    rows: dict[str, dict[str, Any]] = {}
+    for query in ("1 ay icin hangi coin daha mantikli", "1 ay icin hangi hisse daha mantikli"):
+        for row in build_asset_signal_board(
+            text=query,
+            latest_events=latest_events,
+            profile_data=profile_data,
+            limit=6,
+        ):
+            asset = str(row.get("asset") or "").strip().upper()
+            if asset:
+                rows[asset] = dict(row)
+    return rows
+
+
+def _evaluate_outcome(row: dict[str, Any], signal_map: dict[str, dict[str, Any]]) -> tuple[str, str]:
+    asset = str(row.get("asset") or "").strip().upper()
+    if not asset:
+        return "unknown", ""
+    age_status = str(row.get("age_status") or "unknown").strip() or "unknown"
+    signal = dict(signal_map.get(asset) or {})
+    if not signal:
+        if age_status == "beklemede":
+            return "beklemede", "Bu asset icin bugun yeterli taze sinyal yok."
+        return "sinyal-yok", "Bu asset bugunku sinyal panosunda one cikmiyor."
+
+    current_stance = str(signal.get("stance") or "").strip().lower()
+    current_summary = str(signal.get("summary") or "").strip()
+    if current_stance == "buy":
+        return "gucleniyor", current_summary or f"{asset} bugun de guclu kalmaya devam ediyor."
+    if current_stance == "watch":
+        return "izlenmeli", current_summary or f"{asset} tamamen bozulmadi, ama teyit gerekiyor."
+    if current_stance == "avoid":
+        return "zayifladi", current_summary or f"{asset} artik net edge tasimiyor."
+
+    if asset in CRYPTO_ASSETS | EQUITY_ASSETS:
+        return "beklemede", current_summary or f"{asset} icin karar baglami hala izleme asamasinda."
+    return "unknown", current_summary

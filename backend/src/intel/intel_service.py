@@ -87,12 +87,6 @@ _LOW_SIGNAL_WORLD_MARKERS = (
 _HIGH_SIGNAL_WORLD_MARKERS = (
     "missile",
     "ballistic",
-    "election",
-    "president",
-    "prime minister",
-    "government",
-    "parliament",
-    "minister",
     "trade",
     "tariff",
     "sanction",
@@ -108,6 +102,28 @@ _HIGH_SIGNAL_WORLD_MARKERS = (
     "ground invasion",
     "air strike",
     "drone strike",
+    "shipping",
+    "red sea",
+    "refinery",
+)
+_MAJOR_POLITICAL_WORLD_MARKERS = (
+    "election",
+    "vote",
+    "poll",
+    "snap election",
+    "coalition",
+    "parliament vote",
+    "cabinet collapse",
+)
+_MAJOR_ECONOMIC_WORLD_MARKERS = (
+    "trade",
+    "tariff",
+    "sanction",
+    "oil",
+    "gas",
+    "energy",
+    "blackout",
+    "power grid",
     "shipping",
     "red sea",
     "refinery",
@@ -336,15 +352,18 @@ def _is_low_signal_world_event(*, source: str, title: str, summary: str, importa
         return False
     blob = _normalize_text(" ".join([title, summary]))
     has_strategic_signal = any(_contains_keyword(blob, marker) for marker in _HIGH_SIGNAL_WORLD_MARKERS)
+    has_major_political_signal = any(_contains_keyword(blob, marker) for marker in _MAJOR_POLITICAL_WORLD_MARKERS)
+    has_major_economic_signal = any(_contains_keyword(blob, marker) for marker in _MAJOR_ECONOMIC_WORLD_MARKERS)
     has_soft_conflict_signal = any(_contains_keyword(blob, marker) for marker in _SOFT_WORLD_CONFLICT_MARKERS)
     has_profile_signal = any(_contains_keyword(blob, marker) for marker in _LOW_SIGNAL_WORLD_MARKERS)
-    if has_profile_signal and not has_strategic_signal:
+    has_core_signal = has_strategic_signal or has_major_political_signal or has_major_economic_signal
+    if has_profile_signal and not has_core_signal:
         return True
-    if has_soft_conflict_signal and not has_strategic_signal and category == "global":
+    if has_soft_conflict_signal and not (has_strategic_signal or has_major_economic_signal) and category == "global":
         return True
-    if category == "global" and importance < 8 and not has_strategic_signal:
+    if category == "global" and importance < 8 and not has_core_signal:
         return True
-    if importance <= 6 and not has_strategic_signal:
+    if importance <= 7 and not has_core_signal:
         return True
     if has_profile_signal:
         return importance < 9
