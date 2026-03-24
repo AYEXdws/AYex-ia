@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
@@ -171,20 +172,57 @@ def _build_macro_focus(latest_events: list) -> dict:
     importance = int(getattr(macro_event, "importance", 5) or 5)
     summary = str(getattr(macro_event, "summary", "") or "").strip()
     title = str(getattr(macro_event, "title", "") or "").strip()
+    metrics = _extract_macro_metrics(summary)
     signal = "watch"
     if importance >= 8:
         signal = "stress"
     elif importance <= 5:
         signal = "calm"
     reasons = [title] if title else []
+    for label in ("usdtry", "xauusd", "brent", "us10y", "risk_mode"):
+        value = str(metrics.get(label) or "").strip()
+        if not value:
+            continue
+        if label == "risk_mode":
+            reasons.append(f"Risk modu: {value}")
+        elif label == "us10y":
+            reasons.append(f"US 10Y: {value}")
+        elif label == "xauusd":
+            reasons.append(f"XAU/USD: {value}")
+        elif label == "brent":
+            reasons.append(f"Brent: {value}")
+        elif label == "usdtry":
+            reasons.append(f"USD/TRY: {value}")
     if summary:
         reasons.append(summary[:220])
     return {
         "active": True,
         "summary": title or "Makro ozet guncellendi.",
         "signal": signal,
-        "reasons": reasons[:2],
+        "reasons": reasons[:4],
+        "metrics": metrics,
     }
+
+
+def _extract_macro_metrics(summary: str) -> dict[str, str]:
+    text = str(summary or "").strip()
+    patterns = {
+        "usdtry": r"USD/TRY\s+([0-9]+(?:\.[0-9]+)?)",
+        "xauusd": r"XAU/USD\s+([0-9]+(?:\.[0-9]+)?)",
+        "brent": r"Brent\s+([0-9]+(?:\.[0-9]+)?)\s+USD",
+        "us10y": r"US 10Y\s+([0-9]+(?:\.[0-9]+)?)%",
+        "risk_mode": r"Risk modu su an\s+([a-zA-Z0-9\-]+)",
+    }
+    out: dict[str, str] = {}
+    for key, pattern in patterns.items():
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if key == "us10y":
+            value = f"{value}%"
+        out[key] = value
+    return out
 
 
 def _build_persona_focus(profile_data: dict) -> dict:

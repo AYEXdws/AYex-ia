@@ -91,6 +91,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
             summary={marketFocus?.macro?.summary}
             reasons={marketFocus?.macro?.reasons}
           />
+          {marketFocus?.macro?.metrics ? <MacroMetricsCard metrics={marketFocus.macro.metrics} /> : null}
         </div>
       </div>
 
@@ -280,6 +281,32 @@ function DecisionHistoryRow({ row }) {
       </div>
       <div className="mt-2 text-sm leading-6 text-[var(--text)]">{summary}</div>
       {reasons.length ? <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{reasons[0]}</div> : null}
+    </div>
+  );
+}
+
+function MacroMetricsCard({ metrics }) {
+  const cells = [
+    ['USD/TRY', metrics?.usdtry],
+    ['XAU/USD', metrics?.xauusd],
+    ['Brent', metrics?.brent],
+    ['US 10Y', metrics?.us10y],
+    ['Risk', metrics?.risk_mode],
+  ].filter(([, value]) => value);
+
+  if (!cells.length) return null;
+
+  return (
+    <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3">
+      <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-[var(--accent-strong)]">Makro sinyaller</div>
+      <div className="grid grid-cols-2 gap-2">
+        {cells.map(([label, value]) => (
+          <div key={label} className="rounded-lg border border-[var(--line)] bg-black/10 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">{label}</div>
+            <div className="mt-1 text-sm font-medium text-[var(--text)]">{value}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

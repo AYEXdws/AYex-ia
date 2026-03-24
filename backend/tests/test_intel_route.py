@@ -136,6 +136,7 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["market_focus"]["equities_signals"]
     assert payload["market_focus"]["macro"]["active"] is True
     assert "Makro Ozet" in payload["market_focus"]["macro"]["summary"]
+    assert payload["market_focus"]["macro"]["metrics"]["usdtry"] == "44.34"
     assert payload["domain_focus"]["world"]["active"] is False
     assert payload["domain_focus"]["cyber"]["available"] is True
     assert payload["domain_focus"]["cyber"]["freshness_state"] == "fresh"
