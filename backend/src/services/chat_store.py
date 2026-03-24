@@ -148,6 +148,38 @@ class ChatStore:
                     continue
         return out[-max(1, min(500, limit)) :]
 
+    def update_message_metrics(self, session_id: str, message_id: str, metrics_patch: Dict[str, Any]) -> Dict[str, Any] | None:
+        if not session_id or not message_id:
+            return None
+        with self._lock:
+            path = self._msg_path(session_id)
+            if not path.exists():
+                return None
+            messages: List[Dict[str, Any]] = []
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    messages.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            updated: Dict[str, Any] | None = None
+            for row in messages:
+                if str(row.get("id") or "").strip() != message_id:
+                    continue
+                metrics = dict(row.get("metrics") or {})
+                metrics.update(dict(metrics_patch or {}))
+                row["metrics"] = metrics
+                updated = row
+                break
+            if updated is None:
+                return None
+            with path.open("w", encoding="utf-8") as f:
+                for row in messages:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            return updated
+
     def model_context(self, session_id: str, turns: int = 6) -> List[Dict[str, str]]:
         msgs = self.messages(session_id, limit=max(2, turns * 2))
         context: List[Dict[str, str]] = []

@@ -3,10 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from backend.src.routes.deps import get_services
-from backend.src.schemas import MessageInfo, SessionCreateRequest, SessionInfo, SessionListResponse, SessionMessagesResponse
+from backend.src.schemas import DecisionFeedbackRequest, MessageInfo, SessionCreateRequest, SessionInfo, SessionListResponse, SessionMessagesResponse
 from backend.src.services.container import BackendServices
 
 router = APIRouter()
+_ALLOWED_DECISION_OUTCOMES = {"dogru", "yanlis", "beklemede", "gecersiz"}
 
 
 @router.get("/sessions", response_model=SessionListResponse)
@@ -51,3 +52,23 @@ def session_messages(
 def delete_session(session_id: str, services: BackendServices = Depends(get_services)) -> dict:
     deleted = services.chat_store.delete_session(session_id)
     return {"status": "ok", "deleted": deleted}
+
+
+@router.post("/sessions/{session_id}/messages/{message_id}/decision-feedback")
+def decision_feedback(
+    session_id: str,
+    message_id: str,
+    payload: DecisionFeedbackRequest,
+    services: BackendServices = Depends(get_services),
+) -> dict:
+    outcome = str(payload.outcome_status or "").strip().lower()
+    if outcome not in _ALLOWED_DECISION_OUTCOMES:
+        return {"status": "invalid", "updated": False}
+    patch = {
+        "decision_feedback": {
+            "outcome_status": outcome,
+            "note": str(payload.note or "").strip(),
+        }
+    }
+    updated = services.chat_store.update_message_metrics(session_id, message_id, patch)
+    return {"status": "ok", "updated": bool(updated), "message_id": message_id, "outcome_status": outcome}

@@ -86,6 +86,11 @@ class SessionMessagesResponse(BaseModel):
     messages: list[MessageInfo] = Field(default_factory=list)
 
 
+class DecisionFeedbackRequest(BaseModel):
+    outcome_status: str
+    note: Optional[str] = None
+
+
 class ProfileResponse(BaseModel):
     profile: Dict[str, Any] = Field(default_factory=dict)
 

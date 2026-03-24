@@ -80,6 +80,7 @@ def _decision_row(*, message: dict[str, Any], session_id: str, session_title: st
     risks = [str(item).strip() for item in (trace.get("risks") or []) if str(item).strip()][:1]
 
     return {
+        "message_id": str(message.get("id") or "").strip(),
         "session_id": session_id,
         "session_title": session_title,
         "timestamp": iso_ts,
@@ -93,6 +94,7 @@ def _decision_row(*, message: dict[str, Any], session_id: str, session_title: st
         "reasons": reasons,
         "risks": risks,
         "source": str(metrics.get("source") or "").strip(),
+        "feedback": dict(metrics.get("decision_feedback") or {}),
         "_sort_ts": iso_ts or "",
     }
 
@@ -164,6 +166,11 @@ def _build_current_signal_map(*, latest_events: list[Any] | None, profile_data: 
 
 
 def _evaluate_outcome(row: dict[str, Any], signal_map: dict[str, dict[str, Any]]) -> tuple[str, str]:
+    feedback = dict(row.get("feedback") or {})
+    feedback_status = str(feedback.get("outcome_status") or "").strip().lower()
+    feedback_note = str(feedback.get("note") or "").strip()
+    if feedback_status:
+        return feedback_status, feedback_note or "Kullanici geri bildirimi kaydedildi."
     asset = str(row.get("asset") or "").strip().upper()
     if not asset:
         return "unknown", ""

@@ -81,6 +81,34 @@ def test_market_decision_parses_stock_snapshot_in_equity_scope():
     assert out.stance in {"buy", "watch"}
 
 
+def test_market_decision_uses_equity_breadth_and_ai_leadership():
+    latest_events = [
+        SimpleNamespace(
+            title="Hisse Senetleri: ASML: $1.4K (+4.08%) | NVDA: $175.60 (+3.55%) | TSM: $338.13 (+2.70%)",
+            summary=(
+                "Tech/global hisseler: ASML: $1.4K +4.08%, NVDA: $175.60 +3.55%, TSM: $338.13 +2.70%, "
+                "MSFT: $384.59 +0.72%, CRM: $193.40 -1.01%. En buyuk hareket: ASML +4.08%. "
+                "Yukselenler: ASML, NVDA, TSM. Dusenler: CRM."
+            ),
+            tags=["hisse", "borsa", "tech", "asml", "nvda"],
+            source="yahoo_finance",
+            importance=7,
+            final_score=0.67,
+            timestamp=datetime.utcnow(),
+        )
+    ]
+
+    board = build_asset_signal_board(text="1 ay icin hangi hisse daha mantikli", latest_events=latest_events, limit=4)
+
+    top = board[0]
+    assert top["asset"] in {"ASML", "NVDA", "TSM"}
+    assert any(
+        "breadth" in item.lower() or "ai breadth" in item.lower() or "ai/semiconductor" in item.lower()
+        for row in board[:3]
+        for item in [*(row["reasons"] or []), *(row["evidence"] or [])]
+    )
+
+
 def test_market_decision_understands_named_crypto_movers():
     latest_events = [
         SimpleNamespace(

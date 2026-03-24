@@ -89,6 +89,7 @@ AI_EQUITIES = {"NVDA", "ASML", "TSM", "AMD", "MSFT", "GOOGL"}
 CORE_CRYPTO = {"BTC", "ETH", "SOL", "BNB", "LINK"}
 HIGH_BETA_CRYPTO = {"DOGE", "SHIB", "TRX", "XRP", "AVAX"}
 DEFENSIVE_EQUITIES = {"MSFT", "AAPL", "GOOGL", "ASML"}
+CYCLICAL_EQUITIES = {"TSLA", "AMD", "BABA", "AMZN"}
 
 
 @dataclass(frozen=True)
@@ -284,6 +285,15 @@ def _collect_market_candidates(
         candidate_risks=candidate_risks,
         candidate_evidence=candidate_evidence,
     )
+    _apply_equity_market_regime(
+        scope=scope,
+        intel_context=intel_context,
+        latest_events=latest_events,
+        candidate_scores=candidate_scores,
+        candidate_reasons=candidate_reasons,
+        candidate_risks=candidate_risks,
+        candidate_evidence=candidate_evidence,
+    )
     _apply_profile_bias(
         scope=scope,
         profile_data=profile_data,
@@ -329,24 +339,24 @@ def _apply_crypto_market_regime(
     if fear_score is not None and fear_score <= 12:
         for asset, bonus in {"BTC": 0.22, "ETH": 0.16, "SOL": 0.1, "LINK": 0.08}.items():
             candidate_scores[asset] = candidate_scores.get(asset, 0.0) + bonus
-            candidate_reasons.setdefault(asset, []).append(f"Fear&Greed {fear_label} seviyesinde; bu ortamda {asset} digerlerine gore daha dayanıklı duruyor.")
+            _prepend_unique(candidate_reasons.setdefault(asset, []), f"Fear&Greed {fear_label} seviyesinde; bu ortamda {asset} digerlerine gore daha dayanıklı duruyor.")
         for asset, penalty in {"SHIB": 0.22, "DOGE": 0.16, "TRX": 0.12}.items():
             if asset not in candidate_scores:
                 continue
             candidate_scores[asset] = candidate_scores.get(asset, 0.0) - penalty
-            candidate_risks.setdefault(asset, []).append(f"Fear&Greed {fear_label}; {asset} gibi yuksek beta coinlerde kirilganlik artabilir.")
-        candidate_evidence.setdefault("BTC", []).append(f"Fear&Greed: {fear_label}")
+            _prepend_unique(candidate_risks.setdefault(asset, []), f"Fear&Greed {fear_label}; {asset} gibi yuksek beta coinlerde kirilganlik artabilir.")
+        _prepend_unique(candidate_evidence.setdefault("BTC", []), f"Fear&Greed: {fear_label}")
 
     if btc_dominance is not None and btc_dominance >= 70.0:
         for asset, bonus in {"BTC": 0.2, "ETH": 0.12, "SOL": 0.06}.items():
             candidate_scores[asset] = candidate_scores.get(asset, 0.0) + bonus
-            candidate_reasons.setdefault(asset, []).append(f"BTC dominance {btc_dominance:.1f}% seviyesinde; piyasa liderligi daha cekirdek varliklara kayiyor.")
+            _prepend_unique(candidate_reasons.setdefault(asset, []), f"BTC dominance {btc_dominance:.1f}% seviyesinde; piyasa liderligi daha cekirdek varliklara kayiyor.")
         for asset, penalty in {"SHIB": 0.16, "DOGE": 0.12, "TRX": 0.08}.items():
             if asset not in candidate_scores:
                 continue
             candidate_scores[asset] = candidate_scores.get(asset, 0.0) - penalty
-            candidate_risks.setdefault(asset, []).append(f"BTC dominance {btc_dominance:.1f}% iken spekulatif coinler ikinci planda kalabilir.")
-        candidate_evidence.setdefault("BTC", []).append(f"BTC dominance: {btc_dominance:.1f}%")
+            _prepend_unique(candidate_risks.setdefault(asset, []), f"BTC dominance {btc_dominance:.1f}% iken spekulatif coinler ikinci planda kalabilir.")
+        _prepend_unique(candidate_evidence.setdefault("BTC", []), f"BTC dominance: {btc_dominance:.1f}%")
 
 
 def _extract_fear_greed(text: str) -> tuple[float | None, str]:
@@ -363,6 +373,92 @@ def _extract_btc_dominance(text: str) -> float | None:
     match = re.search(r"btc dominance\s*:\s*(\d+(?:\.\d+)?)%", text, flags=re.IGNORECASE)
     if not match:
         return None
+
+
+def _apply_equity_market_regime(
+    *,
+    scope: str,
+    intel_context: dict[str, Any] | None,
+    latest_events: list[Any] | None,
+    candidate_scores: dict[str, float],
+    candidate_reasons: dict[str, list[str]],
+    candidate_risks: dict[str, list[str]],
+    candidate_evidence: dict[str, list[str]],
+) -> None:
+    if scope not in {"equity", "all"}:
+        return
+
+    blobs: list[str] = []
+    for item in list((intel_context or {}).get("key_events") or []):
+        if not isinstance(item, dict):
+            continue
+        blobs.append(" ".join([str(item.get("title") or ""), str(item.get("summary") or ""), " ".join(item.get("tags") or [])]))
+    for event in list(latest_events or [])[:10]:
+        source = str(getattr(event, "source", "") or "").strip().lower()
+        if source != "yahoo_finance":
+            continue
+        blobs.append(" ".join([str(getattr(event, "title", "") or ""), str(getattr(event, "summary", "") or "")]))
+
+    if not blobs:
+        return
+
+    merged = _normalize(" ".join(blobs))
+    breadth = _extract_equity_breadth(merged)
+    lead_assets = _extract_named_equity_lists(merged)
+    ai_breadth = len(lead_assets.intersection(AI_EQUITIES))
+
+    if breadth is not None and breadth >= 3:
+        for asset, bonus in {"ASML": 0.16, "NVDA": 0.14, "TSM": 0.12, "MSFT": 0.08}.items():
+            candidate_scores[asset] = candidate_scores.get(asset, 0.0) + bonus
+            _prepend_unique(candidate_reasons.setdefault(asset, []), f"Piyasa breadth pozitif; {asset} bu ortamda liderlikten faydalaniyor.")
+        _prepend_unique(candidate_evidence.setdefault("ASML", []), f"Equity breadth: +{breadth}")
+    elif breadth is not None and breadth <= -1:
+        for asset, bonus in {"MSFT": 0.1, "AAPL": 0.08, "GOOGL": 0.06}.items():
+            candidate_scores[asset] = candidate_scores.get(asset, 0.0) + bonus
+            _prepend_unique(candidate_reasons.setdefault(asset, []), f"Snapshot breadth zayif; {asset} daha savunmaci bir hisse olarak one cikiyor.")
+        for asset in CYCLICAL_EQUITIES:
+            if asset not in candidate_scores:
+                continue
+            candidate_scores[asset] = candidate_scores.get(asset, 0.0) - 0.08
+            _prepend_unique(candidate_risks.setdefault(asset, []), f"Snapshot breadth zayif; {asset} gibi daha beta isimlerde kirilganlik artabilir.")
+
+    if ai_breadth >= 2:
+        for asset, bonus in {"ASML": 0.14, "NVDA": 0.12, "TSM": 0.1}.items():
+            candidate_scores[asset] = candidate_scores.get(asset, 0.0) + bonus
+            _prepend_unique(candidate_reasons.setdefault(asset, []), f"AI/semiconductor leadership birden fazla isimde teyitli; {asset} bu temaya dogrudan bagli.")
+        _prepend_unique(candidate_evidence.setdefault("ASML", []), "AI breadth teyidi var")
+    elif "crm" in merged and ai_breadth == 0:
+        for asset in {"ASML", "NVDA", "TSM"}:
+            if asset in candidate_scores:
+                candidate_scores[asset] = candidate_scores.get(asset, 0.0) - 0.04
+
+
+def _extract_equity_breadth(text: str) -> int | None:
+    gainer_match = re.search(r"yukselenler\s*:\s*([^.;]+)", text, flags=re.IGNORECASE)
+    loser_match = re.search(r"dusenler\s*:\s*([^.;]+)", text, flags=re.IGNORECASE)
+    gainers = _extract_listed_assets(gainer_match.group(1) if gainer_match else "")
+    losers = _extract_listed_assets(loser_match.group(1) if loser_match else "")
+    if not gainers and not losers:
+        return None
+    return len(gainers) - len(losers)
+
+
+def _extract_named_equity_lists(text: str) -> set[str]:
+    assets: set[str] = set()
+    for prefix in ("yukselenler", "dusenler"):
+        match = re.search(rf"{prefix}\s*:\s*([^.;]+)", text, flags=re.IGNORECASE)
+        if match:
+            assets.update(_extract_listed_assets(match.group(1)))
+    return {asset for asset in assets if asset in EQUITY_ASSETS}
+
+
+def _extract_listed_assets(blob: str) -> set[str]:
+    out: set[str] = set()
+    for raw_asset in re.split(r"[,|/]", str(blob or "")):
+        asset = raw_asset.strip().upper()
+        if asset in ASSET_ALIASES:
+            out.add(asset)
+    return out
     try:
         return float(match.group(1))
     except ValueError:
@@ -755,3 +851,13 @@ def _dedupe_lines(items: list[str]) -> list[str]:
         seen.add(key)
         out.append(cleaned)
     return out
+
+
+def _prepend_unique(items: list[str], value: str) -> None:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return
+    key = _normalize(cleaned)
+    if any(_normalize(item) == key for item in items):
+        return
+    items.insert(0, cleaned)

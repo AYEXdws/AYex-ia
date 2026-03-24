@@ -251,7 +251,7 @@ def _build_public_sections(*, inventory_events: list, market_focus: dict, domain
             if str(getattr(event, "source", "") or "").strip().lower() in sources
         ]
         matching.sort(key=_event_sort_key, reverse=True)
-        curated = [event for event in matching if _is_publishable_public_event(event, key=key)]
+        curated = _dedupe_public_events([event for event in matching if _is_publishable_public_event(event, key=key)])
         focus = _select_public_focus(key=key, market_focus=market_focus, domain_focus=domain_focus)
         feed_meta = dict((live_inventory.get("feeds") or {}).get(key) or {})
         lead_event = curated[0] if curated else None
@@ -414,4 +414,33 @@ def _build_public_changed_today(sections: list[dict]) -> list[dict]:
                 }
             )
     rows.sort(key=lambda item: (float(item.get("score") or 0.0), str(item.get("timestamp") or "")), reverse=True)
-    return rows[:8]
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for row in rows:
+        key = f"{str(row.get('section') or '').strip().lower()}|{str(row.get('source') or '').strip().lower()}|{_normalize_public_text(str(row.get('title') or ''))}"
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+        if len(deduped) >= 8:
+            break
+    return deduped
+
+
+def _dedupe_public_events(events: list) -> list:
+    out: list = []
+    seen: set[str] = set()
+    for event in list(events or []):
+        title = str(getattr(event, "title", "") or "").strip()
+        source = str(getattr(event, "source", "") or "").strip().lower()
+        key = f"{source}|{_normalize_public_text(title)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(event)
+    return out
+
+
+def _normalize_public_text(value: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    return re.sub(r"[^a-z0-9 ]+", "", text)
