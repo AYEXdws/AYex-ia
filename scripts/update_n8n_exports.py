@@ -21,6 +21,7 @@ WRAPPER = """{{ JSON.stringify({
 
 MACRO_CODE = """const forexData = $('Get USD/TRY Rate').first().json || {};
 const goldData = $('Get Gold Price').first().json || {};
+const brentData = $('Get Brent Price').first().json || {};
 
 function num(v, fallback = 0) {
   const n = Number(v);
@@ -55,11 +56,25 @@ function parseGoldUsd(payload) {
   return 0;
 }
 
+function parseYahooChartClose(payload) {
+  const result = payload?.chart?.result?.[0];
+  const meta = result?.meta || {};
+  const closes = result?.indicators?.quote?.[0]?.close || [];
+  const valid = closes.filter((v) => Number.isFinite(Number(v))).map((v) => Number(v));
+  const last = valid.length ? valid[valid.length - 1] : num(meta.regularMarketPrice);
+  const prev = valid.length > 1 ? valid[valid.length - 2] : num(meta.chartPreviousClose || last);
+  return {
+    price: num(last),
+    previous: num(prev || last),
+  };
+}
+
 const tryRate = num(forexData.rates?.TRY);
 const eurRate = num(forexData.rates?.EUR);
 const gbpRate = num(forexData.rates?.GBP);
 const jpyRate = num(forexData.rates?.JPY);
 const goldUsd = parseGoldUsd(goldData);
+const brent = parseYahooChartClose(brentData);
 
 if (tryRate === 0) return [];
 
@@ -69,10 +84,13 @@ const jpyTry = jpyRate ? tryRate / jpyRate : 0;
 const eurUsd = eurRate ? (1 / eurRate) : 0;
 const gbpUsd = gbpRate ? (1 / gbpRate) : 0;
 const goldTry = goldUsd ? goldUsd * tryRate : 0;
+const brentUsd = brent.price;
+const brentChange = brentUsd && brent.previous ? ((brentUsd - brent.previous) / brent.previous) * 100 : 0;
 const fxStress = tryRate > 41 || eurTry > 46 || gbpTry > 53;
 const safeHaven = goldUsd > 4300 || goldTry > 180000;
 const importPressure = tryRate > 38 || eurTry > 43;
-const riskMode = fxStress && safeHaven ? 'savunmaci' : fxStress ? 'kur baskisi' : safeHaven ? 'guvenli liman' : 'dengeli';
+const energyStress = brentUsd > 95 || brentChange > 4;
+const riskMode = fxStress && safeHaven ? 'savunmaci' : fxStress ? 'kur baskisi' : safeHaven ? 'guvenli liman' : energyStress ? 'enerji-baskisi' : 'dengeli';
 
 const title = `Makro Ozet: USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}`;
 const summary =
@@ -80,7 +98,8 @@ const summary =
   `EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'}, GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}, JPY/TRY ${jpyTry ? jpyTry.toFixed(4) : 'N/A'}. ` +
   `EUR/USD ${eurUsd ? eurUsd.toFixed(4) : 'N/A'}, GBP/USD ${gbpUsd ? gbpUsd.toFixed(4) : 'N/A'}. ` +
   `XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'}, ons altin TRY karsiligi ${goldTry ? goldTry.toFixed(0) : 'N/A'}. ` +
-  `Risk modu su an ${riskMode}. Kur tarafi Turkiye odakli fiyatlama, ithalat maliyeti ve enflasyon beklentileri icin izlenmeli.`;
+  `Brent ${brentUsd ? brentUsd.toFixed(2) : 'N/A'} USD (${brentChange >= 0 ? '+' : ''}${brentChange.toFixed(2)}%). ` +
+  `Risk modu su an ${riskMode}. Kur tarafi Turkiye odakli fiyatlama, ithalat maliyeti, enerji maliyeti ve enflasyon beklentileri icin izlenmeli.`;
 
 let importance = 6;
 if (tryRate > 35 || eurTry > 38) importance = 7;
@@ -88,6 +107,7 @@ if (tryRate > 38 || eurTry > 41) importance = 8;
 if (tryRate > 41 || eurTry > 44) importance = 9;
 if (goldTry > 130000) importance = Math.max(importance, 7);
 if (goldTry > 145000) importance = Math.max(importance, 8);
+if (energyStress) importance = Math.max(importance, 8);
 if (fxStress && safeHaven) importance = Math.max(importance, 9);
 if (importPressure) importance = Math.max(importance, 8);
 
@@ -101,12 +121,12 @@ return [{
     summary,
     category: 'economy',
     importance,
-    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'xauusd', riskMode, importPressure ? 'ithalat-baskisi' : 'denge'],
-    why_it_matters: 'Kur sepeti, dolar paritesi ve ons altin birlikte bakildiginda hem enflasyon baskisi hem de riskten kacis daha net okunur.',
-    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'} | mod ${riskMode}`,
+    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'xauusd', 'brent', riskMode, importPressure ? 'ithalat-baskisi' : 'denge'],
+    why_it_matters: 'Kur sepeti, dolar paritesi, ons altin ve Brent birlikte bakildiginda enflasyon baskisi, enerji maliyeti ve riskten kacis daha net okunur.',
+    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'} | Brent ${brentUsd ? brentUsd.toFixed(2) : 'N/A'} | mod ${riskMode}`,
     possible_outcomes: [
-      'Kur sepeti ve altin birlikte yukselirse savunmaci fiyatlama ve riskten kacis guclenebilir',
-      'Kur sakinlesip altin gevserse kisa vadeli risk algisi yumusayabilir'
+      'Kur sepeti, altin ve Brent birlikte yukselirse savunmaci fiyatlama ve maliyet baskisi guclenebilir',
+      'Kur sakinlesip altin ve Brent gevserse kisa vadeli risk algisi yumusayabilir'
     ],
     confidence_hint: 0.9,
     source_quality: 'high',
@@ -269,7 +289,8 @@ const securityMarkers = [
   'cve-', 'vulnerability', 'flaw', 'rce', 'remote code execution', 'actively exploited',
   'active exploitation', 'zero-day', 'zero day', 'ransomware', 'malware', 'phishing',
   'backdoor', 'botnet', 'data breach', 'breach', 'security update', 'patch', 'exploit',
-  'critical', 'authentication bypass', 'privilege escalation'
+  'critical', 'authentication bypass', 'privilege escalation', 'supply chain', 'infostealer',
+  'ci/cd', 'secrets', 'firewall', 'attacker', 'attack'
 ];
 
 const buildTags = (text) => {
@@ -285,6 +306,8 @@ const buildTags = (text) => {
   if (low.includes('ransomware')) add('ransomware');
   if (low.includes('phishing')) add('phishing');
   if (low.includes('breach')) add('breach');
+  if (low.includes('supply chain')) add('supply-chain');
+  if (low.includes('infostealer')) add('infostealer');
   return tags;
 };
 
@@ -294,13 +317,14 @@ const pickImportance = (text) => {
   if (low.includes('known exploited') || low.includes('actively exploited') || low.includes('zero-day') || low.includes('zero day')) return 9;
   if (low.includes('remote code execution') || low.includes('rce') || low.includes('ransomware') || low.includes('data breach')) return 9;
   if (low.includes('critical') || low.includes('authentication bypass') || low.includes('privilege escalation')) return 8;
-  if (low.includes('patch') || low.includes('vulnerability') || low.includes('malware') || low.includes('phishing')) return 7;
+  if (low.includes('patch') || low.includes('vulnerability') || low.includes('malware') || low.includes('phishing') || low.includes('supply chain') || low.includes('infostealer')) return 7;
   return 6;
 };
 
 const sourceForLink = (link) => {
   const low = lower(link);
   if (low.includes('bleepingcomputer.com')) return 'bleeping_computer';
+  if (low.includes('darkreading.com')) return 'dark_reading';
   return 'the_hacker_news';
 };
 
@@ -317,7 +341,7 @@ return items
     return {
       json: {
         source,
-        source_url: row.link || (source === 'bleeping_computer' ? 'https://www.bleepingcomputer.com/' : 'https://thehackernews.com/'),
+        source_url: row.link || (source === 'dark_reading' ? 'https://www.darkreading.com/' : source === 'bleeping_computer' ? 'https://www.bleepingcomputer.com/' : 'https://thehackernews.com/'),
         source_type: 'rss',
         type: 'intel',
         title,
@@ -328,8 +352,8 @@ return items
         why_it_matters: 'Bu gelisme kisa vadede siber risk gorunumunu etkileyebilir.',
         immediate_impact: 'Etkilenen urun, aktif somuru sinyali ve yama gereksinimi izlenmeli.',
         possible_outcomes: ['Aktif somuru yayilirsa etki alani buyuyebilir', 'Yama uygulanirsa risk azalir'],
-        confidence_hint: source === 'bleeping_computer' ? 0.78 : 0.82,
-        source_quality: source === 'bleeping_computer' ? 'medium_high' : 'high',
+        confidence_hint: source === 'dark_reading' ? 0.8 : source === 'bleeping_computer' ? 0.78 : 0.82,
+        source_quality: source === 'the_hacker_news' ? 'high' : 'medium_high',
         region: 'Global',
         market_relevance: 'medium',
         timestamp: row.isoDate || new Date().toISOString(),
@@ -413,9 +437,9 @@ def build_cyber_v2() -> dict:
 
     doc["nodes"].append(
         {
-            "parameters": {"url": "https://www.bleepingcomputer.com/feed/", "options": {}},
-            "id": "cyber-rss-bc",
-            "name": "RSS Read BleepingComputer",
+            "parameters": {"url": "https://www.darkreading.com/rss.xml", "options": {}},
+            "id": "cyber-rss-darkreading",
+            "name": "RSS Read Dark Reading",
             "type": "n8n-nodes-base.rssFeedRead",
             "typeVersion": 1.2,
             "position": [64, -208],
@@ -424,8 +448,8 @@ def build_cyber_v2() -> dict:
     doc["nodes"].append(
         {
             "parameters": {"maxItems": 8},
-            "id": "cyber-limit-bc",
-            "name": "Limit Bleeping Items",
+            "id": "cyber-limit-darkreading",
+            "name": "Limit Dark Reading Items",
             "type": "n8n-nodes-base.limit",
             "typeVersion": 1,
             "position": [224, -208],
@@ -446,13 +470,13 @@ def build_cyber_v2() -> dict:
         "Schedule Trigger": {
             "main": [[
                 {"node": "RSS Read", "type": "main", "index": 0},
-                {"node": "RSS Read BleepingComputer", "type": "main", "index": 0},
+                {"node": "RSS Read Dark Reading", "type": "main", "index": 0},
             ]]
         },
         "RSS Read": {"main": [[{"node": "Limit Latest Items", "type": "main", "index": 0}]]},
-        "RSS Read BleepingComputer": {"main": [[{"node": "Limit Bleeping Items", "type": "main", "index": 0}]]},
+        "RSS Read Dark Reading": {"main": [[{"node": "Limit Dark Reading Items", "type": "main", "index": 0}]]},
         "Limit Latest Items": {"main": [[{"node": "Combine Cyber Feeds", "type": "main", "index": 0}]]},
-        "Limit Bleeping Items": {"main": [[{"node": "Combine Cyber Feeds", "type": "main", "index": 1}]]},
+        "Limit Dark Reading Items": {"main": [[{"node": "Combine Cyber Feeds", "type": "main", "index": 1}]]},
         "Combine Cyber Feeds": {"main": [[{"node": "Build Cyber Intel Event", "type": "main", "index": 0}]]},
         "Build Cyber Intel Event": {"main": [[{"node": "Score & Intelligence Engine", "type": "main", "index": 0}]]},
         "Score & Intelligence Engine": {"main": [[{"node": "Payload Valid mi", "type": "main", "index": 0}]]},
@@ -486,10 +510,31 @@ def main() -> None:
                 node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
         remove_login_and_rewire(doc)
         if filename == "Macro Economy Feed v1.json":
+            doc["nodes"].append(
+                {
+                    "parameters": {
+                        "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZ=F?interval=1d&range=5d",
+                        "options": {
+                            "headerParameters": {
+                                "parameters": [
+                                    {"name": "User-Agent", "value": "Mozilla/5.0"},
+                                    {"name": "Accept", "value": "application/json"},
+                                ]
+                            }
+                        },
+                    },
+                    "id": "macro-brent",
+                    "name": "Get Brent Price",
+                    "type": "n8n-nodes-base.httpRequest",
+                    "typeVersion": 4.4,
+                    "position": [128, -96],
+                }
+            )
             doc["connections"]["Schedule Trigger"] = {
                 "main": [[
                     {"node": "Get USD/TRY Rate", "type": "main", "index": 0},
                     {"node": "Get Gold Price", "type": "main", "index": 0},
+                    {"node": "Get Brent Price", "type": "main", "index": 0},
                 ]]
             }
         out_name = filename.replace(" v1.json", " v2.json")

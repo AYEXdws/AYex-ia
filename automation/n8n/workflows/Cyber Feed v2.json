@@ -50,7 +50,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nif (!Array.isArray(items) || items.length === 0) return [];\n\nconst cleanText = (v) => String(v || '').replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\nconst lower = (v) => cleanText(v).toLowerCase();\nconst has = (text, marker) => lower(text).includes(String(marker || '').toLowerCase());\nconst securityMarkers = [\n  'cve-', 'vulnerability', 'flaw', 'rce', 'remote code execution', 'actively exploited',\n  'active exploitation', 'zero-day', 'zero day', 'ransomware', 'malware', 'phishing',\n  'backdoor', 'botnet', 'data breach', 'breach', 'security update', 'patch', 'exploit',\n  'critical', 'authentication bypass', 'privilege escalation'\n];\n\nconst buildTags = (text) => {\n  const low = lower(text);\n  const tags = [];\n  const add = (t) => { if (!tags.includes(t) && tags.length < 5) tags.push(t); };\n  if (low.includes('cve-')) add('cve');\n  if (low.includes('rce') || low.includes('remote code execution')) add('rce');\n  if (low.includes('critical')) add('critical');\n  if (low.includes('actively exploited') || low.includes('active exploitation')) add('exploited');\n  if (low.includes('vulnerability') || low.includes('flaw')) add('vuln');\n  if (low.includes('malware')) add('malware');\n  if (low.includes('ransomware')) add('ransomware');\n  if (low.includes('phishing')) add('phishing');\n  if (low.includes('breach')) add('breach');\n  return tags;\n};\n\nconst pickImportance = (text) => {\n  const low = lower(text);\n  if (low.includes('cve-') && (low.includes('critical') || low.includes('actively exploited'))) return 10;\n  if (low.includes('known exploited') || low.includes('actively exploited') || low.includes('zero-day') || low.includes('zero day')) return 9;\n  if (low.includes('remote code execution') || low.includes('rce') || low.includes('ransomware') || low.includes('data breach')) return 9;\n  if (low.includes('critical') || low.includes('authentication bypass') || low.includes('privilege escalation')) return 8;\n  if (low.includes('patch') || low.includes('vulnerability') || low.includes('malware') || low.includes('phishing')) return 7;\n  return 6;\n};\n\nconst sourceForLink = (link) => {\n  const low = lower(link);\n  if (low.includes('bleepingcomputer.com')) return 'bleeping_computer';\n  return 'the_hacker_news';\n};\n\nreturn items\n  .map((item) => {\n    const row = item.json || {};\n    const title = cleanText(row.title);\n    const snippet = cleanText(row.contentSnippet || row.content || row.summary || '');\n    const fullText = `${title} ${snippet}`.trim();\n    const source = sourceForLink(row.link || '');\n    const importance = pickImportance(fullText);\n    const tags = buildTags(fullText);\n    const securitySignal = securityMarkers.some((marker) => has(fullText, marker));\n    return {\n      json: {\n        source,\n        source_url: row.link || (source === 'bleeping_computer' ? 'https://www.bleepingcomputer.com/' : 'https://thehackernews.com/'),\n        source_type: 'rss',\n        type: 'intel',\n        title,\n        summary: snippet.slice(0, 500),\n        category: 'security',\n        importance,\n        tags,\n        why_it_matters: 'Bu gelisme kisa vadede siber risk gorunumunu etkileyebilir.',\n        immediate_impact: 'Etkilenen urun, aktif somuru sinyali ve yama gereksinimi izlenmeli.',\n        possible_outcomes: ['Aktif somuru yayilirsa etki alani buyuyebilir', 'Yama uygulanirsa risk azalir'],\n        confidence_hint: source === 'bleeping_computer' ? 0.78 : 0.82,\n        source_quality: source === 'bleeping_computer' ? 'medium_high' : 'high',\n        region: 'Global',\n        market_relevance: 'medium',\n        timestamp: row.isoDate || new Date().toISOString(),\n        security_signal: securitySignal,\n      }\n    };\n  })\n  .filter((item) => item.json.title && item.json.summary && item.json.summary.length >= 40)\n  .filter((item) => item.json.security_signal || item.json.tags.length >= 2 || item.json.importance >= 7)\n  .map((item) => {\n    delete item.json.security_signal;\n    return item;\n  });"
+        "jsCode": "const items = $input.all();\nif (!Array.isArray(items) || items.length === 0) return [];\n\nconst cleanText = (v) => String(v || '').replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\nconst lower = (v) => cleanText(v).toLowerCase();\nconst has = (text, marker) => lower(text).includes(String(marker || '').toLowerCase());\nconst securityMarkers = [\n  'cve-', 'vulnerability', 'flaw', 'rce', 'remote code execution', 'actively exploited',\n  'active exploitation', 'zero-day', 'zero day', 'ransomware', 'malware', 'phishing',\n  'backdoor', 'botnet', 'data breach', 'breach', 'security update', 'patch', 'exploit',\n  'critical', 'authentication bypass', 'privilege escalation', 'supply chain', 'infostealer', 'ci/cd', 'secrets', 'firewall', 'attacker', 'attack'\n];\n\nconst buildTags = (text) => {\n  const low = lower(text);\n  const tags = [];\n  const add = (t) => { if (!tags.includes(t) && tags.length < 5) tags.push(t); };\n  if (low.includes('cve-')) add('cve');\n  if (low.includes('rce') || low.includes('remote code execution')) add('rce');\n  if (low.includes('critical')) add('critical');\n  if (low.includes('actively exploited') || low.includes('active exploitation')) add('exploited');\n  if (low.includes('vulnerability') || low.includes('flaw')) add('vuln');\n  if (low.includes('malware')) add('malware');\n  if (low.includes('ransomware')) add('ransomware');\n  if (low.includes('phishing')) add('phishing');\n  if (low.includes('breach')) add('breach');\n  if (low.includes('supply chain')) add('supply-chain');\n  if (low.includes('infostealer')) add('infostealer');\n  return tags;\n};\n\nconst pickImportance = (text) => {\n  const low = lower(text);\n  if (low.includes('cve-') && (low.includes('critical') || low.includes('actively exploited'))) return 10;\n  if (low.includes('known exploited') || low.includes('actively exploited') || low.includes('zero-day') || low.includes('zero day')) return 9;\n  if (low.includes('remote code execution') || low.includes('rce') || low.includes('ransomware') || low.includes('data breach')) return 9;\n  if (low.includes('critical') || low.includes('authentication bypass') || low.includes('privilege escalation')) return 8;\n  if (low.includes('patch') || low.includes('vulnerability') || low.includes('malware') || low.includes('phishing') || low.includes('supply chain') || low.includes('infostealer')) return 7;\n  return 6;\n};\n\nconst sourceForLink = (link) => {\n  const low = lower(link);\n  if (low.includes('bleepingcomputer.com')) return 'bleeping_computer';\n  if (low.includes('darkreading.com')) return 'dark_reading';\n  return 'the_hacker_news';\n};\n\nreturn items\n  .map((item) => {\n    const row = item.json || {};\n    const title = cleanText(row.title);\n    const snippet = cleanText(row.contentSnippet || row.content || row.summary || '');\n    const fullText = `${title} ${snippet}`.trim();\n    const source = sourceForLink(row.link || '');\n    const importance = pickImportance(fullText);\n    const tags = buildTags(fullText);\n    const securitySignal = securityMarkers.some((marker) => has(fullText, marker));\n    return {\n      json: {\n        source,\n        source_url: row.link || (source === 'dark_reading' ? 'https://www.darkreading.com/' : source === 'bleeping_computer' ? 'https://www.bleepingcomputer.com/' : 'https://thehackernews.com/'),\n        source_type: 'rss',\n        type: 'intel',\n        title,\n        summary: snippet.slice(0, 500),\n        category: 'security',\n        importance,\n        tags,\n        why_it_matters: 'Bu gelisme kisa vadede siber risk gorunumunu etkileyebilir.',\n        immediate_impact: 'Etkilenen urun, aktif somuru sinyali ve yama gereksinimi izlenmeli.',\n        possible_outcomes: ['Aktif somuru yayilirsa etki alani buyuyebilir', 'Yama uygulanirsa risk azalir'],\n        confidence_hint: source === 'dark_reading' ? 0.8 : source === 'bleeping_computer' ? 0.78 : 0.82,\n        source_quality: source === 'the_hacker_news' ? 'high' : 'medium_high',\n        region: 'Global',\n        market_relevance: 'medium',\n        timestamp: row.isoDate || new Date().toISOString(),\n        security_signal: securitySignal,\n      }\n    };\n  })\n  .filter((item) => item.json.title && item.json.summary && item.json.summary.length >= 40)\n  .filter((item) => item.json.security_signal || item.json.tags.length >= 2 || item.json.importance >= 7)\n  .map((item) => {\n    delete item.json.security_signal;\n    return item;\n  });"
       },
       "id": "46109bdb-7ee5-413b-a41e-cd5403e713f8",
       "name": "Build Cyber Intel Event",
@@ -284,11 +284,11 @@
     },
     {
       "parameters": {
-        "url": "https://www.bleepingcomputer.com/feed/",
+        "url": "https://www.darkreading.com/rss.xml",
         "options": {}
       },
-      "id": "cyber-rss-bc",
-      "name": "RSS Read BleepingComputer",
+      "id": "cyber-rss-darkreading",
+      "name": "RSS Read Dark Reading",
       "type": "n8n-nodes-base.rssFeedRead",
       "typeVersion": 1.2,
       "position": [
@@ -300,8 +300,8 @@
       "parameters": {
         "maxItems": 8
       },
-      "id": "cyber-limit-bc",
-      "name": "Limit Bleeping Items",
+      "id": "cyber-limit-darkreading",
+      "name": "Limit Dark Reading Items",
       "type": "n8n-nodes-base.limit",
       "typeVersion": 1,
       "position": [
@@ -334,7 +334,7 @@
             "index": 0
           },
           {
-            "node": "RSS Read BleepingComputer",
+            "node": "RSS Read Dark Reading",
             "type": "main",
             "index": 0
           }
@@ -352,17 +352,6 @@
         ]
       ]
     },
-    "RSS Read BleepingComputer": {
-      "main": [
-        [
-          {
-            "node": "Limit Bleeping Items",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Limit Latest Items": {
       "main": [
         [
@@ -370,17 +359,6 @@
             "node": "Combine Cyber Feeds",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "Limit Bleeping Items": {
-      "main": [
-        [
-          {
-            "node": "Combine Cyber Feeds",
-            "type": "main",
-            "index": 1
           }
         ]
       ]
@@ -448,6 +426,28 @@
             "node": "Send Event to AYEX",
             "type": "main",
             "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read Dark Reading": {
+      "main": [
+        [
+          {
+            "node": "Limit Dark Reading Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit Dark Reading Items": {
+      "main": [
+        [
+          {
+            "node": "Combine Cyber Feeds",
+            "type": "main",
+            "index": 1
           }
         ]
       ]

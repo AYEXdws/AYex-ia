@@ -139,7 +139,7 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["domain_focus"]["world"]["active"] is False
     assert payload["domain_focus"]["cyber"]["available"] is True
     assert payload["domain_focus"]["cyber"]["freshness_state"] == "fresh"
-    assert payload["domain_focus"]["cyber"]["source"] == "bleeping_computer"
+    assert payload["domain_focus"]["cyber"]["source"] in {"bleeping_computer", "dark_reading"}
     assert payload["live_inventory"]["feeds"]["crypto"]["available"] is True
     assert payload["live_inventory"]["feeds"]["macro"]["available"] is True
     assert payload["live_inventory"]["feeds"]["cyber"]["available"] is True

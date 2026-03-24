@@ -19,7 +19,7 @@ _PUBLIC_FEED_SPECS = (
     ("equities", "Hisse", {"yahoo_finance"}),
     ("macro", "Makro", {"er_api"}),
     ("world", "World", {"bbc_world", "reuters"}),
-    ("cyber", "Cyber", {"the_hacker_news", "bleeping_computer"}),
+    ("cyber", "Cyber", {"the_hacker_news", "bleeping_computer", "dark_reading"}),
 )
 _PUBLIC_SECTION_RULES = {
     "crypto": {"min_importance": 6, "min_score": 0.56, "max_age_hours": 72.0},
@@ -141,7 +141,7 @@ def _build_domain_focus(latest_events: list) -> dict:
         "cyber": build_source_focus(
             latest_events,
             label="Cyber",
-            sources={"the_hacker_news", "bleeping_computer"},
+            sources={"the_hacker_news", "bleeping_computer", "dark_reading"},
             fallback="Siber tarafta taze bir event yok.",
             fresh_hours=12.0,
             watch_hours=36.0,
