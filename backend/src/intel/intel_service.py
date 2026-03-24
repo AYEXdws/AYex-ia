@@ -36,6 +36,7 @@ _SOURCE_CATEGORY_HINTS = {
     "bbc_world": "global",
     "reuters": "global",
     "the_hacker_news": "security",
+    "bleeping_computer": "security",
     "coingecko": "economy",
     "yahoo_finance": "economy",
     "er_api": "economy",
@@ -508,7 +509,7 @@ def _source_query_boost(source: str, query_topics: list[str], query_categories: 
         boost += 0.24
     if src == "er_api" and "economy" in query_topics:
         boost += 0.24
-    if src == "the_hacker_news" and "security" in query_categories:
+    if src in {"the_hacker_news", "bleeping_computer"} and "security" in query_categories:
         boost += 0.28
     if src in {"bbc_world", "reuters"} and "global" in query_categories:
         boost += 0.24
@@ -529,7 +530,7 @@ def _preferred_sources_for_query(query: str, query_topics: list[str], query_cate
         preferred.add("coingecko")
 
     if "security" in query_categories or any(_contains_keyword(q_norm, marker) for marker in ("siber", "cyber", "hack", "ihlal", "vuln", "cve", "tehdit", "guvenlik")):
-        preferred.add("the_hacker_news")
+        preferred.update({"the_hacker_news", "bleeping_computer"})
 
     if "global" in query_categories or any(_contains_keyword(q_norm, marker) for marker in ("dunya", "world", "jeopolitik", "savas", "ukrayna", "iran", "israil", "lebnan", "secm")):
         preferred.update({"bbc_world", "reuters"})

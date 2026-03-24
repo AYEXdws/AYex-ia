@@ -146,7 +146,7 @@ def build_live_inventory(events: list[Any]) -> dict[str, Any]:
         "cyber": build_source_focus(
             events,
             label="Cyber",
-            sources={"the_hacker_news"},
+            sources={"the_hacker_news", "bleeping_computer"},
             fallback="Cyber feed'inde taze event yok.",
             fresh_hours=12.0,
             watch_hours=36.0,

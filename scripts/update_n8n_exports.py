@@ -89,6 +89,7 @@ if (tryRate > 41 || eurTry > 44) importance = 9;
 if (goldTry > 130000) importance = Math.max(importance, 7);
 if (goldTry > 145000) importance = Math.max(importance, 8);
 if (fxStress && safeHaven) importance = Math.max(importance, 9);
+if (importPressure) importance = Math.max(importance, 8);
 
 return [{
   json: {
@@ -100,7 +101,7 @@ return [{
     summary,
     category: 'economy',
     importance,
-    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'xauusd', riskMode],
+    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'xauusd', riskMode, importPressure ? 'ithalat-baskisi' : 'denge'],
     why_it_matters: 'Kur sepeti, dolar paritesi ve ons altin birlikte bakildiginda hem enflasyon baskisi hem de riskten kacis daha net okunur.',
     immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'} | mod ${riskMode}`,
     possible_outcomes: [
@@ -148,11 +149,15 @@ const lowSignal = [
   'viral clip',
   'wedding',
   'festival crowd',
-  'city center celebration'
+  'city center celebration',
+  'dies at',
+  'billionaire owner',
+  'lifestyle blogger',
+  'homesick'
 ];
 
-const strategicMarkers = ['war', 'conflict', 'troops', 'ground invasion', 'missile', 'ballistic', 'hezbollah', 'nuclear', 'attack', 'border', 'sanction', 'tariff', 'trade', 'oil', 'gas', 'energy', 'blackout', 'power grid'];
-const politicalMarkers = ['election', 'president', 'prime minister', 'government', 'parliament', 'minister'];
+const strategicMarkers = ['war', 'conflict', 'troops', 'ground invasion', 'missile', 'ballistic', 'hezbollah', 'nuclear', 'attack', 'border', 'sanction', 'tariff', 'trade', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'ceasefire', 'drone', 'air strike', 'hostage', 'shipping', 'red sea', 'refinery'];
+const politicalMarkers = ['election', 'president', 'prime minister', 'government', 'parliament', 'minister', 'cabinet', 'coalition'];
 const economicMarkers = ['trade', 'tariff', 'sanction', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'workers', 'inflation', 'gdp', 'bank'];
 
 const tagRules = [
@@ -225,9 +230,9 @@ const rows = items
   .filter((row) => row.title && row.summary && row.summary.length >= 70)
   .filter((row) => !lowSignal.some((marker) => row.low.includes(marker)))
   .filter((row) => row.importance >= 7)
-  .filter((row) => row.strategic || row.political || row.economic || row.importance >= 8)
+  .filter((row) => row.strategic || row.economic || (row.political && row.importance >= 8))
   .sort((a, b) => b.score - a.score || new Date(b.isoDate).getTime() - new Date(a.isoDate).getTime())
-  .slice(0, 3);
+  .slice(0, 2);
 
 return rows.map((row) => ({
   json: {
@@ -250,6 +255,106 @@ return rows.map((row) => ({
     timestamp: row.isoDate
   }
 }));"""
+
+CYBER_CODE = """const items = $input.all();
+if (!Array.isArray(items) || items.length === 0) return [];
+
+const cleanText = (v) => String(v || '').replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();
+const lower = (v) => cleanText(v).toLowerCase();
+const has = (text, marker) => lower(text).includes(String(marker || '').toLowerCase());
+const securityMarkers = [
+  'cve-', 'vulnerability', 'flaw', 'rce', 'remote code execution', 'actively exploited',
+  'active exploitation', 'zero-day', 'zero day', 'ransomware', 'malware', 'phishing',
+  'backdoor', 'botnet', 'data breach', 'breach', 'security update', 'patch', 'exploit',
+  'critical', 'authentication bypass', 'privilege escalation'
+];
+
+const buildTags = (text) => {
+  const low = lower(text);
+  const tags = [];
+  const add = (t) => { if (!tags.includes(t) && tags.length < 5) tags.push(t); };
+  if (low.includes('cve-')) add('cve');
+  if (low.includes('rce') || low.includes('remote code execution')) add('rce');
+  if (low.includes('critical')) add('critical');
+  if (low.includes('actively exploited') || low.includes('active exploitation')) add('exploited');
+  if (low.includes('vulnerability') || low.includes('flaw')) add('vuln');
+  if (low.includes('malware')) add('malware');
+  if (low.includes('ransomware')) add('ransomware');
+  if (low.includes('phishing')) add('phishing');
+  if (low.includes('breach')) add('breach');
+  return tags;
+};
+
+const pickImportance = (text) => {
+  const low = lower(text);
+  if (low.includes('cve-') && (low.includes('critical') || low.includes('actively exploited'))) return 10;
+  if (low.includes('known exploited') || low.includes('actively exploited') || low.includes('zero-day') || low.includes('zero day')) return 9;
+  if (low.includes('remote code execution') || low.includes('rce') || low.includes('ransomware') || low.includes('data breach')) return 9;
+  if (low.includes('critical') || low.includes('authentication bypass') || low.includes('privilege escalation')) return 8;
+  if (low.includes('patch') || low.includes('vulnerability') || low.includes('malware') || low.includes('phishing')) return 7;
+  return 6;
+};
+
+const sourceForLink = (link) => {
+  const low = lower(link);
+  if (low.includes('bleepingcomputer.com')) return 'bleeping_computer';
+  return 'the_hacker_news';
+};
+
+return items
+  .map((item) => {
+    const row = item.json || {};
+    const title = cleanText(row.title);
+    const snippet = cleanText(row.contentSnippet || row.content || row.summary || '');
+    const fullText = `${title} ${snippet}`.trim();
+    const source = sourceForLink(row.link || '');
+    const importance = pickImportance(fullText);
+    const tags = buildTags(fullText);
+    const securitySignal = securityMarkers.some((marker) => has(fullText, marker));
+    return {
+      json: {
+        source,
+        source_url: row.link || (source === 'bleeping_computer' ? 'https://www.bleepingcomputer.com/' : 'https://thehackernews.com/'),
+        source_type: 'rss',
+        type: 'intel',
+        title,
+        summary: snippet.slice(0, 500),
+        category: 'security',
+        importance,
+        tags,
+        why_it_matters: 'Bu gelisme kisa vadede siber risk gorunumunu etkileyebilir.',
+        immediate_impact: 'Etkilenen urun, aktif somuru sinyali ve yama gereksinimi izlenmeli.',
+        possible_outcomes: ['Aktif somuru yayilirsa etki alani buyuyebilir', 'Yama uygulanirsa risk azalir'],
+        confidence_hint: source === 'bleeping_computer' ? 0.78 : 0.82,
+        source_quality: source === 'bleeping_computer' ? 'medium_high' : 'high',
+        region: 'Global',
+        market_relevance: 'medium',
+        timestamp: row.isoDate || new Date().toISOString(),
+        security_signal: securitySignal,
+      }
+    };
+  })
+  .filter((item) => item.json.title && item.json.summary && item.json.summary.length >= 60)
+  .filter((item) => item.json.security_signal || item.json.importance >= 8)
+  .map((item) => {
+    delete item.json.security_signal;
+    return item;
+  });"""
+
+CYBER_SCORE_CODE = """const item = $json;
+const title = String(item.title || '').toLowerCase();
+const summary = String(item.summary || '').toLowerCase();
+let intelScore = Number(item.importance || 5);
+if (title.includes('critical')) intelScore += 1;
+if (title.includes('cve-')) intelScore += 1;
+if (summary.includes('remote code execution') || summary.includes('rce')) intelScore += 2;
+if (summary.includes('active exploitation') || summary.includes('actively exploited') || summary.includes('known exploited')) intelScore += 2;
+if (summary.includes('zero-day') || summary.includes('zero day')) intelScore += 2;
+if (summary.includes('ransomware') || summary.includes('data breach')) intelScore += 1;
+if (summary.includes('missing authentication') || summary.includes('authentication bypass')) intelScore += 1;
+intelScore = Math.min(intelScore, 10);
+const shouldAlert = intelScore >= 7;
+return { json: { ...item, intel_score: intelScore, should_alert: shouldAlert } };"""
 
 
 def update_send_event(node: dict) -> None:
@@ -281,6 +386,78 @@ def remove_login_and_rewire(doc: dict) -> None:
             "main": [[{"node": "Send Event to AYEX", "type": "main", "index": 0}]]
         }
     connections.pop("Login", None)
+
+
+def build_cyber_v2() -> dict:
+    src = ROOT / "Cyber Feed v1-2.json"
+    doc = json.loads(src.read_text(encoding="utf-8"))
+    doc["name"] = "Cyber Feed v2"
+    remove_login_and_rewire(doc)
+
+    for node in doc["nodes"]:
+        if node.get("name") == "Schedule Trigger":
+            node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 20
+        elif node.get("name") == "Limit Latest Items":
+            node["parameters"]["maxItems"] = 6
+        elif node.get("name") == "Build Cyber Intel Event":
+            node.setdefault("parameters", {})["jsCode"] = CYBER_CODE
+        elif node.get("name") == "Score & Intelligence Engine":
+            node.setdefault("parameters", {})["jsCode"] = CYBER_SCORE_CODE
+        elif node.get("name") == "Onem Esigi":
+            node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 7
+        elif node.get("name") == "Send Event to AYEX":
+            update_send_event(node)
+
+    doc["nodes"].append(
+        {
+            "parameters": {"url": "https://www.bleepingcomputer.com/feed/", "options": {}},
+            "id": "cyber-rss-bc",
+            "name": "RSS Read BleepingComputer",
+            "type": "n8n-nodes-base.rssFeedRead",
+            "typeVersion": 1.2,
+            "position": [64, -208],
+        }
+    )
+    doc["nodes"].append(
+        {
+            "parameters": {"maxItems": 6},
+            "id": "cyber-limit-bc",
+            "name": "Limit Bleeping Items",
+            "type": "n8n-nodes-base.limit",
+            "typeVersion": 1,
+            "position": [224, -208],
+        }
+    )
+    doc["nodes"].append(
+        {
+            "parameters": {"mode": "append"},
+            "id": "cyber-merge",
+            "name": "Combine Cyber Feeds",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 3.2,
+            "position": [320, -96],
+        }
+    )
+
+    doc["connections"] = {
+        "Schedule Trigger": {
+            "main": [[
+                {"node": "RSS Read", "type": "main", "index": 0},
+                {"node": "RSS Read BleepingComputer", "type": "main", "index": 0},
+            ]]
+        },
+        "RSS Read": {"main": [[{"node": "Limit Latest Items", "type": "main", "index": 0}]]},
+        "RSS Read BleepingComputer": {"main": [[{"node": "Limit Bleeping Items", "type": "main", "index": 0}]]},
+        "Limit Latest Items": {"main": [[{"node": "Combine Cyber Feeds", "type": "main", "index": 0}]]},
+        "Limit Bleeping Items": {"main": [[{"node": "Combine Cyber Feeds", "type": "main", "index": 1}]]},
+        "Combine Cyber Feeds": {"main": [[{"node": "Build Cyber Intel Event", "type": "main", "index": 0}]]},
+        "Build Cyber Intel Event": {"main": [[{"node": "Score & Intelligence Engine", "type": "main", "index": 0}]]},
+        "Score & Intelligence Engine": {"main": [[{"node": "Payload Valid mi", "type": "main", "index": 0}]]},
+        "Payload Valid mi": {"main": [[], [{"node": "Onem Esigi", "type": "main", "index": 0}]]},
+        "Onem Esigi": {"main": [[{"node": "Clean Intel Payload", "type": "main", "index": 0}]]},
+        "Clean Intel Payload": {"main": [[{"node": "Send Event to AYEX", "type": "main", "index": 0}]]},
+    }
+    return doc
 
 
 def main() -> None:
@@ -317,6 +494,12 @@ def main() -> None:
         out_path.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
         (REPO_DIR / out_name).write_text(out_path.read_text(encoding="utf-8"), encoding="utf-8")
         print(f"wrote {out_path}")
+
+    cyber_doc = build_cyber_v2()
+    cyber_out = ROOT / "Cyber Feed v2.json"
+    cyber_out.write_text(json.dumps(cyber_doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    (REPO_DIR / "Cyber Feed v2.json").write_text(cyber_out.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"wrote {cyber_out}")
 
 
 if __name__ == "__main__":

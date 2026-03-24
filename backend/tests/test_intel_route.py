@@ -54,6 +54,17 @@ class _FakeIntel:
                 final_score=0.79,
                 confidence_score=0.75,
             ),
+            IntelEvent(
+                title="Microsoft warns of active phishing chain targeting enterprise tenants",
+                summary="BleepingComputer reports a fresh phishing campaign and credential theft pressure.",
+                category="security",
+                importance=8,
+                source="bleeping_computer",
+                tags=["phishing", "breach", "critical"],
+                timestamp=datetime.utcnow() - timedelta(hours=2),
+                final_score=0.74,
+                confidence_score=0.71,
+            ),
         ]
         self.store = SimpleNamespace(get_all_events=lambda: list(self._events))
 
@@ -127,7 +138,8 @@ def test_intel_brief_includes_market_focus_cards():
     assert "Makro Ozet" in payload["market_focus"]["macro"]["summary"]
     assert payload["domain_focus"]["world"]["active"] is False
     assert payload["domain_focus"]["cyber"]["available"] is True
-    assert payload["domain_focus"]["cyber"]["freshness_state"] == "watch"
+    assert payload["domain_focus"]["cyber"]["freshness_state"] == "fresh"
+    assert payload["domain_focus"]["cyber"]["source"] == "bleeping_computer"
     assert payload["live_inventory"]["feeds"]["crypto"]["available"] is True
     assert payload["live_inventory"]["feeds"]["macro"]["available"] is True
     assert payload["live_inventory"]["feeds"]["cyber"]["available"] is True
