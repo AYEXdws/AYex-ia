@@ -153,7 +153,10 @@ const lowSignal = [
   'dies at',
   'billionaire owner',
   'lifestyle blogger',
-  'homesick'
+  'homesick',
+  'pharmacist',
+  'blogger',
+  'civilians killed in the war'
 ];
 
 const strategicMarkers = ['war', 'conflict', 'troops', 'ground invasion', 'missile', 'ballistic', 'hezbollah', 'nuclear', 'attack', 'border', 'sanction', 'tariff', 'trade', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'ceasefire', 'drone', 'air strike', 'hostage', 'shipping', 'red sea', 'refinery'];
@@ -229,10 +232,10 @@ const rows = items
   })
   .filter((row) => row.title && row.summary && row.summary.length >= 70)
   .filter((row) => !lowSignal.some((marker) => row.low.includes(marker)))
-  .filter((row) => row.importance >= 7)
-  .filter((row) => row.strategic || row.economic || (row.political && row.importance >= 8))
+  .filter((row) => row.importance >= 8)
+  .filter((row) => row.strategic || row.economic)
   .sort((a, b) => b.score - a.score || new Date(b.isoDate).getTime() - new Date(a.isoDate).getTime())
-  .slice(0, 2);
+  .slice(0, 1);
 
 return rows.map((row) => ({
   json: {
@@ -334,8 +337,8 @@ return items
       }
     };
   })
-  .filter((item) => item.json.title && item.json.summary && item.json.summary.length >= 60)
-  .filter((item) => item.json.security_signal || item.json.importance >= 8)
+  .filter((item) => item.json.title && item.json.summary && item.json.summary.length >= 40)
+  .filter((item) => item.json.security_signal || item.json.tags.length >= 2 || item.json.importance >= 7)
   .map((item) => {
     delete item.json.security_signal;
     return item;
@@ -396,15 +399,15 @@ def build_cyber_v2() -> dict:
 
     for node in doc["nodes"]:
         if node.get("name") == "Schedule Trigger":
-            node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 20
+            node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 15
         elif node.get("name") == "Limit Latest Items":
-            node["parameters"]["maxItems"] = 6
+            node["parameters"]["maxItems"] = 8
         elif node.get("name") == "Build Cyber Intel Event":
             node.setdefault("parameters", {})["jsCode"] = CYBER_CODE
         elif node.get("name") == "Score & Intelligence Engine":
             node.setdefault("parameters", {})["jsCode"] = CYBER_SCORE_CODE
         elif node.get("name") == "Onem Esigi":
-            node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 7
+            node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 6
         elif node.get("name") == "Send Event to AYEX":
             update_send_event(node)
 
@@ -420,7 +423,7 @@ def build_cyber_v2() -> dict:
     )
     doc["nodes"].append(
         {
-            "parameters": {"maxItems": 6},
+            "parameters": {"maxItems": 8},
             "id": "cyber-limit-bc",
             "name": "Limit Bleeping Items",
             "type": "n8n-nodes-base.limit",
@@ -476,9 +479,9 @@ def main() -> None:
             elif node.get("name") == "Send Event to AYEX":
                 update_send_event(node)
             elif filename == "World News Feed v1.json" and node.get("name") == "Onem Esigi":
-                node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 7
+                node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 8
             elif filename == "World News Feed v1.json" and node.get("name") == "Schedule Trigger":
-                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
+                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 120
             elif filename == "Macro Economy Feed v1.json" and node.get("name") == "Schedule Trigger":
                 node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
         remove_login_and_rewire(doc)

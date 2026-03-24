@@ -142,6 +142,21 @@ def test_validate_event_payload_rejects_low_signal_missing_person_world_news():
         service.validate_event_payload(payload)
 
 
+def test_validate_event_payload_rejects_human_interest_war_profile_story():
+    service = _service()
+    payload = {
+        "title": "A committed pharmacist and a homesick blogger – the Iranian civilians killed in the war",
+        "summary": "A profile-style story about civilians killed in the war, focused on their personal lives rather than a strategic development.",
+        "category": "global",
+        "importance": 8,
+        "source": "bbc_world",
+        "tags": ["world"],
+    }
+
+    with pytest.raises(ValueError, match="low_signal_event"):
+        service.validate_event_payload(payload)
+
+
 def test_select_relevant_intel_context_prefers_macro_source_over_profile_crypto_bias():
     service = IntelService(
         IntelStore(),

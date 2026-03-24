@@ -73,6 +73,10 @@ _LOW_SIGNAL_WORLD_MARKERS = (
     "talent show",
     "festival crowd",
     "city center celebration",
+    "pharmacist",
+    "blogger",
+    "homesick",
+    "civilians killed in the war",
 )
 _HIGH_SIGNAL_WORLD_MARKERS = (
     "war",
@@ -319,7 +323,7 @@ def _is_low_signal_world_event(*, source: str, title: str, summary: str, importa
     if importance <= 6 and not has_strategic_signal:
         return True
     if any(_contains_keyword(blob, marker) for marker in _LOW_SIGNAL_WORLD_MARKERS):
-        return not (has_strategic_signal and importance >= 8)
+        return importance < 9
     return False
 
 
