@@ -22,6 +22,7 @@ WRAPPER = """{{ JSON.stringify({
 MACRO_CODE = """const forexData = $('Get USD/TRY Rate').first().json || {};
 const goldData = $('Get Gold Price').first().json || {};
 const brentData = $('Get Brent Price').first().json || {};
+const us10yData = $('Get US 10Y Price').first().json || {};
 
 function num(v, fallback = 0) {
   const n = Number(v);
@@ -86,11 +87,21 @@ const gbpUsd = gbpRate ? (1 / gbpRate) : 0;
 const goldTry = goldUsd ? goldUsd * tryRate : 0;
 const brentUsd = brent.price;
 const brentChange = brentUsd && brent.previous ? ((brentUsd - brent.previous) / brent.previous) * 100 : 0;
+const us10yRaw = parseYahooChartClose(us10yData).price;
+const us10y = us10yRaw > 20 ? us10yRaw / 10 : us10yRaw;
 const fxStress = tryRate > 41 || eurTry > 46 || gbpTry > 53;
 const safeHaven = goldUsd > 4300 || goldTry > 180000;
 const importPressure = tryRate > 38 || eurTry > 43;
 const energyStress = brentUsd > 95 || brentChange > 4;
-const riskMode = fxStress && safeHaven ? 'savunmaci' : fxStress ? 'kur baskisi' : safeHaven ? 'guvenli liman' : energyStress ? 'enerji-baskisi' : 'dengeli';
+const rateStress = us10y >= 4.5;
+const rateTight = us10y >= 4.2;
+const riskMode = fxStress && safeHaven ? 'savunmaci'
+  : fxStress ? 'kur baskisi'
+  : safeHaven ? 'guvenli liman'
+  : energyStress && rateStress ? 'enerji-ve-faiz-baskisi'
+  : energyStress ? 'enerji-baskisi'
+  : rateStress ? 'faiz-baskisi'
+  : 'dengeli';
 
 const title = `Makro Ozet: USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | GBP/TRY ${gbpTry ? gbpTry.toFixed(2) : 'N/A'}`;
 const summary =
@@ -99,7 +110,8 @@ const summary =
   `EUR/USD ${eurUsd ? eurUsd.toFixed(4) : 'N/A'}, GBP/USD ${gbpUsd ? gbpUsd.toFixed(4) : 'N/A'}. ` +
   `XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'}, ons altin TRY karsiligi ${goldTry ? goldTry.toFixed(0) : 'N/A'}. ` +
   `Brent ${brentUsd ? brentUsd.toFixed(2) : 'N/A'} USD (${brentChange >= 0 ? '+' : ''}${brentChange.toFixed(2)}%). ` +
-  `Risk modu su an ${riskMode}. Kur tarafi Turkiye odakli fiyatlama, ithalat maliyeti, enerji maliyeti ve enflasyon beklentileri icin izlenmeli.`;
+  `US 10Y ${us10y ? us10y.toFixed(2) : 'N/A'}%. ` +
+  `Risk modu su an ${riskMode}. Kur tarafi Turkiye odakli fiyatlama, ithalat maliyeti, enerji maliyeti, global faiz baskisi ve enflasyon beklentileri icin izlenmeli.`;
 
 let importance = 6;
 if (tryRate > 35 || eurTry > 38) importance = 7;
@@ -108,7 +120,10 @@ if (tryRate > 41 || eurTry > 44) importance = 9;
 if (goldTry > 130000) importance = Math.max(importance, 7);
 if (goldTry > 145000) importance = Math.max(importance, 8);
 if (energyStress) importance = Math.max(importance, 8);
+if (rateTight) importance = Math.max(importance, 7);
+if (rateStress) importance = Math.max(importance, 8);
 if (fxStress && safeHaven) importance = Math.max(importance, 9);
+if (energyStress && rateStress) importance = Math.max(importance, 9);
 if (importPressure) importance = Math.max(importance, 8);
 
 return [{
@@ -121,12 +136,12 @@ return [{
     summary,
     category: 'economy',
     importance,
-    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'xauusd', 'brent', riskMode, importPressure ? 'ithalat-baskisi' : 'denge'],
-    why_it_matters: 'Kur sepeti, dolar paritesi, ons altin ve Brent birlikte bakildiginda enflasyon baskisi, enerji maliyeti ve riskten kacis daha net okunur.',
-    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'} | Brent ${brentUsd ? brentUsd.toFixed(2) : 'N/A'} | mod ${riskMode}`,
+    tags: ['makro', 'usdtry', 'eurtry', 'gbptry', 'xauusd', 'brent', 'us10y', riskMode, importPressure ? 'ithalat-baskisi' : 'denge'],
+    why_it_matters: 'Kur sepeti, dolar paritesi, ons altin, Brent ve ABD 10 yillik faiz birlikte bakildiginda enflasyon baskisi, enerji maliyeti, finansal kosullar ve riskten kacis daha net okunur.',
+    immediate_impact: `USD/TRY ${tryRate.toFixed(2)} | EUR/TRY ${eurTry ? eurTry.toFixed(2) : 'N/A'} | XAU/USD ${goldUsd ? goldUsd.toFixed(2) : 'N/A'} | Brent ${brentUsd ? brentUsd.toFixed(2) : 'N/A'} | US10Y ${us10y ? us10y.toFixed(2) : 'N/A'} | mod ${riskMode}`,
     possible_outcomes: [
-      'Kur sepeti, altin ve Brent birlikte yukselirse savunmaci fiyatlama ve maliyet baskisi guclenebilir',
-      'Kur sakinlesip altin ve Brent gevserse kisa vadeli risk algisi yumusayabilir'
+      'Kur sepeti, altin, Brent ve faiz birlikte yukselirse savunmaci fiyatlama ve maliyet baskisi guclenebilir',
+      'Kur sakinlesip altin, Brent ve faiz gevserse kisa vadeli risk algisi yumusayabilir'
     ],
     confidence_hint: 0.9,
     source_quality: 'high',
@@ -541,11 +556,32 @@ def main() -> None:
                     "position": [128, -96],
                 }
             )
+            doc["nodes"].append(
+                {
+                    "parameters": {
+                        "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX?interval=1d&range=5d",
+                        "options": {
+                            "headerParameters": {
+                                "parameters": [
+                                    {"name": "User-Agent", "value": "Mozilla/5.0"},
+                                    {"name": "Accept", "value": "application/json"},
+                                ]
+                            }
+                        },
+                    },
+                    "id": "macro-us10y",
+                    "name": "Get US 10Y Price",
+                    "type": "n8n-nodes-base.httpRequest",
+                    "typeVersion": 4.4,
+                    "position": [128, 16],
+                }
+            )
             doc["connections"]["Schedule Trigger"] = {
                 "main": [[
                     {"node": "Get USD/TRY Rate", "type": "main", "index": 0},
                     {"node": "Get Gold Price", "type": "main", "index": 0},
                     {"node": "Get Brent Price", "type": "main", "index": 0},
+                    {"node": "Get US 10Y Price", "type": "main", "index": 0},
                 ]]
             }
         out_name = filename.replace(" v1.json", " v2.json")
