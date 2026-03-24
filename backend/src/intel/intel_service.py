@@ -78,10 +78,13 @@ _LOW_SIGNAL_WORLD_MARKERS = (
     "blogger",
     "homesick",
     "civilians killed in the war",
+    "civilian cost of war",
+    "civilian cost",
+    "profile-style story",
+    "personal lives",
+    "civilian toll",
 )
 _HIGH_SIGNAL_WORLD_MARKERS = (
-    "war",
-    "conflict",
     "missile",
     "ballistic",
     "election",
@@ -98,11 +101,25 @@ _HIGH_SIGNAL_WORLD_MARKERS = (
     "energy",
     "blackout",
     "power grid",
-    "attack",
     "troops",
     "invasion",
     "nuclear",
     "ceasefire",
+    "ground invasion",
+    "air strike",
+    "drone strike",
+    "shipping",
+    "red sea",
+    "refinery",
+)
+_SOFT_WORLD_CONFLICT_MARKERS = (
+    "war",
+    "conflict",
+    "attack",
+    "civilian",
+    "civilians",
+    "toll",
+    "killed",
 )
 
 
@@ -319,11 +336,17 @@ def _is_low_signal_world_event(*, source: str, title: str, summary: str, importa
         return False
     blob = _normalize_text(" ".join([title, summary]))
     has_strategic_signal = any(_contains_keyword(blob, marker) for marker in _HIGH_SIGNAL_WORLD_MARKERS)
+    has_soft_conflict_signal = any(_contains_keyword(blob, marker) for marker in _SOFT_WORLD_CONFLICT_MARKERS)
+    has_profile_signal = any(_contains_keyword(blob, marker) for marker in _LOW_SIGNAL_WORLD_MARKERS)
+    if has_profile_signal and not has_strategic_signal:
+        return True
+    if has_soft_conflict_signal and not has_strategic_signal and category == "global":
+        return True
     if category == "global" and importance < 8 and not has_strategic_signal:
         return True
     if importance <= 6 and not has_strategic_signal:
         return True
-    if any(_contains_keyword(blob, marker) for marker in _LOW_SIGNAL_WORLD_MARKERS):
+    if has_profile_signal:
         return importance < 9
     return False
 

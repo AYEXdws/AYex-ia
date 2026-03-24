@@ -157,6 +157,21 @@ def test_validate_event_payload_rejects_human_interest_war_profile_story():
         service.validate_event_payload(payload)
 
 
+def test_validate_event_payload_rejects_soft_conflict_story_without_hard_strategic_signal():
+    service = _service()
+    payload = {
+        "title": "The alarming civilian cost of war in Iran grows as families flee",
+        "summary": "A human-focused report about civilian toll and family displacement, without a new military, sanctions or energy development.",
+        "category": "global",
+        "importance": 8,
+        "source": "bbc_world",
+        "tags": ["world"],
+    }
+
+    with pytest.raises(ValueError, match="low_signal_event"):
+        service.validate_event_payload(payload)
+
+
 def test_select_relevant_intel_context_prefers_macro_source_over_profile_crypto_bias():
     service = IntelService(
         IntelStore(),

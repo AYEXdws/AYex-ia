@@ -176,10 +176,16 @@ const lowSignal = [
   'homesick',
   'pharmacist',
   'blogger',
-  'civilians killed in the war'
+  'civilians killed in the war',
+  'civilian cost of war',
+  'civilian cost',
+  'profile-style story',
+  'personal lives',
+  'civilian toll'
 ];
 
-const strategicMarkers = ['war', 'conflict', 'troops', 'ground invasion', 'missile', 'ballistic', 'hezbollah', 'nuclear', 'attack', 'border', 'sanction', 'tariff', 'trade', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'ceasefire', 'drone', 'air strike', 'hostage', 'shipping', 'red sea', 'refinery'];
+const hardStrategicMarkers = ['troops', 'ground invasion', 'missile', 'ballistic', 'hezbollah', 'nuclear', 'border', 'sanction', 'tariff', 'trade', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'ceasefire', 'drone', 'air strike', 'hostage', 'shipping', 'red sea', 'refinery'];
+const softConflictMarkers = ['war', 'conflict', 'attack', 'civilian', 'civilians', 'toll', 'killed'];
 const politicalMarkers = ['election', 'president', 'prime minister', 'government', 'parliament', 'minister', 'cabinet', 'coalition'];
 const economicMarkers = ['trade', 'tariff', 'sanction', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'workers', 'inflation', 'gdp', 'bank'];
 
@@ -199,7 +205,7 @@ const tagRules = [
 ];
 
 const pickCategory = (text) => {
-  if (strategicMarkers.some((marker) => has(text, marker))) return 'global';
+  if (hardStrategicMarkers.some((marker) => has(text, marker))) return 'global';
   if (politicalMarkers.some((marker) => has(text, marker))) return 'global';
   if (['economy', 'market', 'trade', 'gdp', 'inflation', 'bank', 'oil', 'energy', 'sanctions', 'tariff', 'workers'].some((marker) => has(text, marker))) return 'economy';
   if (['cyber', 'hack', 'breach', 'vulnerability', 'malware'].some((marker) => has(text, marker))) return 'security';
@@ -209,7 +215,7 @@ const pickCategory = (text) => {
 
 const pickImportance = (text) => {
   if (['breaking', 'urgent', 'crisis', 'emergency'].some((marker) => has(text, marker))) return 9;
-  if (['war', 'attack', 'missile', 'nuclear', 'hezbollah', 'ground invasion'].some((marker) => has(text, marker))) return 8;
+  if (['missile', 'nuclear', 'hezbollah', 'ground invasion', 'ballistic', 'sanction', 'tariff', 'oil', 'gas', 'energy', 'blackout', 'power grid'].some((marker) => has(text, marker))) return 8;
   if (['election', 'president', 'prime minister', 'government', 'trade', 'sanctions', 'tariff', 'blackout', 'power grid'].some((marker) => has(text, marker))) return 7;
   return 6;
 };
@@ -232,9 +238,11 @@ const rows = items
     const category = pickCategory(fullText);
     const importance = pickImportance(fullText);
     const tags = deriveTags(fullText, category);
-    const strategic = strategicMarkers.some((marker) => has(fullText, marker));
+    const strategic = hardStrategicMarkers.some((marker) => has(fullText, marker));
+    const softConflict = softConflictMarkers.some((marker) => has(fullText, marker));
     const political = politicalMarkers.some((marker) => has(fullText, marker));
     const economic = economicMarkers.some((marker) => has(fullText, marker));
+    const profileLike = lowSignal.some((marker) => lower(fullText).includes(marker));
     return {
       title,
       summary: snippet.slice(0, 600),
@@ -242,8 +250,10 @@ const rows = items
       importance,
       tags,
       strategic,
+      softConflict,
       political,
       economic,
+      profileLike,
       link: row.link || 'https://bbc.com/news/world',
       isoDate: row.isoDate || new Date().toISOString(),
       low: lower(fullText),
@@ -251,9 +261,10 @@ const rows = items
     };
   })
   .filter((row) => row.title && row.summary && row.summary.length >= 70)
-  .filter((row) => !lowSignal.some((marker) => row.low.includes(marker)))
+  .filter((row) => !row.profileLike)
   .filter((row) => row.importance >= 8)
   .filter((row) => row.strategic || row.economic)
+  .filter((row) => !(row.softConflict && !row.strategic && !row.economic))
   .sort((a, b) => b.score - a.score || new Date(b.isoDate).getTime() - new Date(a.isoDate).getTime())
   .slice(0, 1);
 
