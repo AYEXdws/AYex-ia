@@ -196,7 +196,12 @@ const lowSignal = [
   'civilian cost',
   'profile-style story',
   'personal lives',
-  'civilian toll'
+  'civilian toll',
+  'families flee',
+  'grieving families',
+  'personal accounts',
+  'survivors tell',
+  'mourning families'
 ];
 
 const hardStrategicMarkers = ['troops', 'ground invasion', 'missile', 'ballistic', 'hezbollah', 'nuclear', 'border', 'sanction', 'tariff', 'trade', 'oil', 'gas', 'energy', 'blackout', 'power grid', 'ceasefire', 'drone', 'air strike', 'hostage', 'shipping', 'red sea', 'refinery'];
@@ -275,10 +280,10 @@ const rows = items
       score: importance + (strategic ? 0.8 : 0) + (political ? 0.4 : 0) + (economic ? 0.4 : 0)
     };
   })
-  .filter((row) => row.title && row.summary && row.summary.length >= 70)
+  .filter((row) => row.title && row.summary && row.summary.length >= 90)
   .filter((row) => !row.profileLike)
   .filter((row) => row.importance >= 8)
-  .filter((row) => row.strategic || row.economic || row.political)
+  .filter((row) => row.strategic || row.economic || (row.political && row.importance >= 9))
   .filter((row) => !(row.softConflict && !row.strategic && !row.economic))
   .sort((a, b) => b.score - a.score || new Date(b.isoDate).getTime() - new Date(a.isoDate).getTime())
   .slice(0, 1);
@@ -531,7 +536,7 @@ def main() -> None:
             elif filename == "World News Feed v1.json" and node.get("name") == "Onem Esigi":
                 node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 8
             elif filename == "World News Feed v1.json" and node.get("name") == "Schedule Trigger":
-                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 180
+                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 240
             elif filename == "Macro Economy Feed v1.json" and node.get("name") == "Schedule Trigger":
                 node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
         remove_login_and_rewire(doc)

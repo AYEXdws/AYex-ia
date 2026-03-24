@@ -171,6 +171,19 @@ export default function SystemPage({ onNavigateHome }) {
               <PulseCell label="Cyber" value={intelBrief?.live_inventory?.feeds?.cyber?.freshness} detail={intelBrief?.domain_focus?.cyber?.summary} />
             </section>
 
+            <section className="grid gap-4 md:grid-cols-2">
+              <MarketBoard
+                title="Hisse Panosu"
+                lead={intelBrief?.market_focus?.equities?.summary}
+                rows={intelBrief?.market_focus?.equities_signals}
+              />
+              <MarketBoard
+                title="Kripto Panosu"
+                lead={intelBrief?.market_focus?.crypto?.summary}
+                rows={intelBrief?.market_focus?.crypto_signals}
+              />
+            </section>
+
             <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[280px_minmax(0,1fr)_340px]">
               <SessionRail
                 sessions={sessions}
@@ -204,5 +217,45 @@ function PulseCell({ label, value, detail }) {
       </div>
       <div className="mt-2 text-sm leading-6 text-[var(--text)]">{detail || 'Sinyal yok.'}</div>
     </div>
+  );
+}
+
+function MarketBoard({ title, lead, rows }) {
+  const items = Array.isArray(rows) ? rows.slice(0, 4) : [];
+  return (
+    <section className="glass-card px-4 py-4 md:px-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="section-kicker">Board</div>
+          <h2 className="panel-title mt-2 text-xl text-[var(--text)]">{title}</h2>
+        </div>
+        <div className="rounded-full border border-[var(--line)] bg-white/[0.03] px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+          Asset
+        </div>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{lead || 'Net sinyal henuz yok.'}</p>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {items.length ? (
+          items.map((row) => (
+            <div key={`${title}-${row.asset}`} className="rounded-[22px] border border-[var(--line)] bg-white/[0.03] px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold tracking-[0.04em] text-[var(--text)]">{row.asset}</div>
+                <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--accent-strong)]">
+                  {row.stance} · {row.score}
+                </div>
+              </div>
+              <div className="mt-3 text-sm leading-6 text-[var(--text)]">{row.summary || 'Sinyal ozetlenemedi.'}</div>
+              {Array.isArray(row.reasons) && row.reasons.length ? (
+                <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{row.reasons[0]}</div>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <div className="rounded-[22px] border border-[var(--line)] bg-white/[0.03] px-4 py-4 text-sm text-[var(--muted)]">
+            Bu pano icin henuz signal yok.
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

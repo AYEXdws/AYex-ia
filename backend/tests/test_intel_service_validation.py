@@ -187,6 +187,21 @@ def test_validate_event_payload_rejects_soft_political_profile_story_without_maj
         service.validate_event_payload(payload)
 
 
+def test_validate_event_payload_rejects_soft_political_world_story_without_power_shift_signal():
+    service = _service()
+    payload = {
+        "title": "President meets grieving families as tensions persist after border attack",
+        "summary": "A profile-led report centered on grieving families and political optics, without an election, coalition collapse, sanctions, trade or energy shock.",
+        "category": "global",
+        "importance": 8,
+        "source": "bbc_world",
+        "tags": ["world"],
+    }
+
+    with pytest.raises(ValueError, match="low_signal_event"):
+        service.validate_event_payload(payload)
+
+
 def test_select_relevant_intel_context_prefers_macro_source_over_profile_crypto_bias():
     service = IntelService(
         IntelStore(),

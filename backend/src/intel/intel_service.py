@@ -83,6 +83,11 @@ _LOW_SIGNAL_WORLD_MARKERS = (
     "profile-style story",
     "personal lives",
     "civilian toll",
+    "families flee",
+    "grieving families",
+    "personal accounts",
+    "survivors tell",
+    "mourning families",
 )
 _HIGH_SIGNAL_WORLD_MARKERS = (
     "missile",
@@ -356,8 +361,16 @@ def _is_low_signal_world_event(*, source: str, title: str, summary: str, importa
     has_major_economic_signal = any(_contains_keyword(blob, marker) for marker in _MAJOR_ECONOMIC_WORLD_MARKERS)
     has_soft_conflict_signal = any(_contains_keyword(blob, marker) for marker in _SOFT_WORLD_CONFLICT_MARKERS)
     has_profile_signal = any(_contains_keyword(blob, marker) for marker in _LOW_SIGNAL_WORLD_MARKERS)
+    has_real_power_shift_signal = any(
+        _contains_keyword(blob, marker)
+        for marker in ("election", "snap election", "coalition", "parliament vote", "cabinet collapse")
+    )
     has_core_signal = has_strategic_signal or has_major_political_signal or has_major_economic_signal
     if has_profile_signal and not has_core_signal:
+        return True
+    if has_major_political_signal and not has_real_power_shift_signal and not (has_strategic_signal or has_major_economic_signal):
+        return True
+    if has_major_political_signal and importance < 8 and not (has_strategic_signal or has_major_economic_signal):
         return True
     if has_soft_conflict_signal and not (has_strategic_signal or has_major_economic_signal) and category == "global":
         return True
