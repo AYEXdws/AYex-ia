@@ -1,8 +1,27 @@
 import { motion } from 'framer-motion';
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
-export default function MessageBubble({ role, text, meta, trace }) {
+const DECISION_FEEDBACK_OPTIONS = [
+  ['dogru', 'Dogru'],
+  ['yanlis', 'Yanlis'],
+  ['beklemede', 'Beklemede'],
+  ['gecersiz', 'Gecersiz'],
+];
+
+export default function MessageBubble({
+  role,
+  text,
+  meta,
+  trace,
+  messageId,
+  sessionId,
+  feedback,
+  responseMode,
+  onDecisionFeedback,
+}) {
   const isUser = role === 'user';
+  const showDecisionFeedback = !isUser && responseMode === 'decision' && messageId && sessionId;
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -24,9 +43,70 @@ export default function MessageBubble({ role, text, meta, trace }) {
         {meta ? (
           <div className="mt-2 text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">{meta}</div>
         ) : null}
+        {showDecisionFeedback ? (
+          <DecisionFeedbackBar
+            messageId={messageId}
+            sessionId={sessionId}
+            feedback={feedback}
+            onDecisionFeedback={onDecisionFeedback}
+          />
+        ) : null}
         {!isUser && trace ? <TraceBlock trace={trace} /> : null}
       </div>
     </motion.div>
+  );
+}
+
+function DecisionFeedbackBar({ messageId, sessionId, feedback, onDecisionFeedback }) {
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const selected = String(feedback?.outcome_status || '').trim().toLowerCase();
+
+  async function handleClick(outcomeStatus) {
+    if (!onDecisionFeedback || busy || selected === outcomeStatus) return;
+    setBusy(outcomeStatus);
+    setError('');
+    try {
+      await onDecisionFeedback(messageId, sessionId, outcomeStatus);
+    } catch (err) {
+      setError(err.message || 'Feedback kaydedilemedi');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-[18px] border border-[var(--line)] bg-black/10 px-3 py-3">
+      <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--muted)]">karar geri bildirimi</div>
+      <div className="flex flex-wrap gap-2">
+        {DECISION_FEEDBACK_OPTIONS.map(([value, label]) => {
+          const active = selected === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              disabled={Boolean(busy)}
+              onClick={() => handleClick(value)}
+              className={[
+                'rounded-full border px-3 py-2 text-[11px] uppercase tracking-[0.12em] transition-colors',
+                active
+                  ? 'border-[var(--accent-strong)] bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                  : 'border-[var(--line)] bg-white/[0.03] text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--text)]',
+                busy && !active ? 'opacity-60' : '',
+              ].join(' ')}
+            >
+              {busy === value ? 'Kaydediliyor' : label}
+            </button>
+          );
+        })}
+      </div>
+      {selected ? (
+        <div className="mt-2 text-[12px] leading-5 text-[var(--muted)]">
+          Son durum: <span className="text-[var(--text)]">{selected}</span>
+        </div>
+      ) : null}
+      {error ? <div className="mt-2 text-[12px] leading-5 text-[#d59378]">{error}</div> : null}
+    </div>
   );
 }
 

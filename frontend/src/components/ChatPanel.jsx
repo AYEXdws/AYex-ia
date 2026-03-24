@@ -7,7 +7,11 @@ const API_BASE = import.meta.env.VITE_API_BASE || '';
 const INITIAL_MESSAGE = {
   role: 'assistant',
   text: 'Hazirim. Konuyu net yaz. Gerekirse karar veririm.',
-  meta: 'baglam acik • canli akis hazir'
+  meta: 'baglam acik • canli akis hazir',
+  messageId: '',
+  sessionId: '',
+  feedback: null,
+  responseMode: ''
 };
 
 export default function ChatPanel({ token, selectedSessionId, onSessionChange, onStatus, onRefreshSurface, onInsight }) {
@@ -39,10 +43,14 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
         }
         const mapped = Array.isArray(data?.messages)
           ? data.messages.map((message) => ({
+              messageId: message.id,
+              sessionId: message.session_id,
               role: message.role,
               text: message.text,
               meta: buildMeta(message.metrics, message.source, message.latency_ms),
-              trace: message.metrics?.explainability || null
+              trace: message.metrics?.explainability || null,
+              responseMode: message.metrics?.response_mode || '',
+              feedback: message.metrics?.decision_feedback || null
             }))
           : [];
         setMessages(mapped.length ? mapped : [INITIAL_MESSAGE]);
@@ -82,7 +90,18 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
 
     const payloadText = text.trim();
     setText('');
-    setMessages((prev) => [...prev, { role: 'user', text: payloadText, meta: 'you' }]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'user',
+        text: payloadText,
+        meta: 'you',
+        messageId: '',
+        sessionId: selectedSessionId || '',
+        feedback: null,
+        responseMode: ''
+      }
+    ]);
     setTyping(true);
     const started = performance.now();
 
@@ -128,10 +147,14 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
       setMessages((prev) => [
         ...prev,
         {
+          messageId: String(metrics.message_id || ''),
+          sessionId: data.session_id || selectedSessionId || '',
           role: 'assistant',
           text: data.reply || 'No response',
           meta: `${source} • ${metrics.latency_ms || latency} ms • ${mode}`,
-          trace: explainability
+          trace: explainability,
+          responseMode: metrics.response_mode || '',
+          feedback: null
         }
       ]);
     } catch (err) {
@@ -147,6 +170,37 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
     } finally {
       setTyping(false);
     }
+  }
+
+  async function submitDecisionFeedback(messageId, sessionId, outcomeStatus) {
+    if (!messageId || !sessionId) return false;
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages/${messageId}/decision-feedback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ outcome_status: outcomeStatus })
+    });
+    const data = await res.json();
+    if (!res.ok || data?.status !== 'ok' || !data?.updated) {
+      throw new Error(data?.detail || data?.status || 'Feedback update failed');
+    }
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.messageId === messageId
+          ? {
+              ...message,
+              feedback: {
+                outcome_status: outcomeStatus,
+                note: ''
+              }
+            }
+          : message
+      )
+    );
+    onRefreshSurface?.();
+    return true;
   }
 
   return (
@@ -193,7 +247,18 @@ export default function ChatPanel({ token, selectedSessionId, onSessionChange, o
           </div>
         ) : null}
         {messages.map((m, i) => (
-          <MessageBubble key={`${m.role}-${i}`} role={m.role} text={m.text} meta={m.meta} trace={m.trace} />
+          <MessageBubble
+            key={m.messageId || `${m.role}-${i}`}
+            role={m.role}
+            text={m.text}
+            meta={m.meta}
+            trace={m.trace}
+            messageId={m.messageId}
+            sessionId={m.sessionId}
+            feedback={m.feedback}
+            responseMode={m.responseMode}
+            onDecisionFeedback={submitDecisionFeedback}
+          />
         ))}
         <AnimatePresence>{typing ? <TypingDots key="typing" /> : null}</AnimatePresence>
         <div ref={bottomRef} />

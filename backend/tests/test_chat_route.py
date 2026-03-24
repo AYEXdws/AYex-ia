@@ -48,6 +48,7 @@ class _FakeChatStore:
     def append_message(self, session_id, role, text, source="", latency_ms=None, metrics=None):
         _ = (latency_ms, metrics)
         self.appended.append((session_id, role, text))
+        return {"id": f"{role}-msg", "session_id": session_id, "text": text}
 
     def model_context(self, session_id, turns):
         _ = (session_id, turns)
@@ -337,3 +338,4 @@ def test_chat_live_inventory_query_bypasses_model_and_lists_feeds():
     assert "Makro: aktif" in out.reply
     assert "World: aktif" in out.reply
     assert "Cyber: aktif" in out.reply
+    assert out.metrics.get("message_id") == "assistant-msg"

@@ -364,7 +364,7 @@ def _build_live_data_response(*, services: BackendServices, session_id: str) -> 
 
     live_inventory = build_live_inventory(inventory_events)
     reply = render_live_inventory_reply(inventory_events)
-    services.chat_store.append_message(session_id, role="assistant", text=reply, source="live_inventory")
+    assistant_message = services.chat_store.append_message(session_id, role="assistant", text=reply, source="live_inventory")
     return ChatResponse(
         reply=reply,
         session_id=session_id,
@@ -374,6 +374,7 @@ def _build_live_data_response(*, services: BackendServices, session_id: str) -> 
             "route": "live_inventory",
             "event_count": len(inventory_events),
             "live_inventory": live_inventory,
+            "message_id": assistant_message.get("id", ""),
         },
     )
 
@@ -471,7 +472,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         prev_metrics = dedup.get("metrics") or {}
         prev_ok = bool(prev_metrics.get("ok", True))
 
-        services.chat_store.append_message(
+        assistant_message = services.chat_store.append_message(
             session.id,
             role="assistant",
             text=reply,
@@ -488,6 +489,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
                 "latency_ms": 0,
                 "cache_hit": True,
                 "event_count": int(prev_metrics.get("event_count", 0) or 0),
+                "message_id": assistant_message.get("id", ""),
             },
         )
     history = services.chat_store.model_context(session.id, turns=services.settings.model_context_turns)
@@ -654,7 +656,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         tool=tool_evidence.selected_tool,
     )
 
-    services.chat_store.append_message(
+    assistant_message = services.chat_store.append_message(
         session.id,
         role="assistant",
         text=reply,
@@ -720,6 +722,7 @@ async def chat(payload: ChatRequest, request: Request, services: BackendServices
         reply=reply,
         session_id=session.id,
         metrics={
+            "message_id": assistant_message.get("id", ""),
             "model": used_model,
             "used_model": used_model,
             "latency_ms": latency_ms,
