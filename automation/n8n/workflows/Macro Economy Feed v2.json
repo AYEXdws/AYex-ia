@@ -6,8 +6,8 @@
         "rule": {
           "interval": [
             {
-              "field": "minutes",
-              "minutesInterval": 60
+              "field": "hours",
+              "hoursInterval": 1
             }
           ]
         }
@@ -75,13 +75,19 @@
           },
           "conditions": [
             {
-              "id": "mv1",
-              "leftValue": "={{$json.title}}",
-              "rightValue": "",
+              "leftValue": "={{($json.title || '').trim().length}}",
+              "rightValue": 0,
               "operator": {
-                "type": "string",
-                "operation": "isNotEmpty",
-                "singleValue": true
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "leftValue": "={{($json.summary || '').trim().length}}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
               }
             }
           ],

@@ -6,8 +6,8 @@
         "rule": {
           "interval": [
             {
-              "field": "minutes",
-              "minutesInterval": 240
+              "field": "hours",
+              "hoursInterval": 4
             }
           ]
         }
@@ -59,23 +59,19 @@
           },
           "conditions": [
             {
-              "id": "5d558666-dbd8-4550-9b8f-a88628db0e22",
-              "leftValue": "={{$json.title}}",
-              "rightValue": "",
+              "leftValue": "={{($json.title || '').trim().length}}",
+              "rightValue": 0,
               "operator": {
-                "type": "string",
-                "operation": "isNotEmpty",
-                "singleValue": true
+                "type": "number",
+                "operation": "gt"
               }
             },
             {
-              "id": "cab5b4c7-3da9-444e-a02e-4898e1b1c014",
-              "leftValue": "={{$json.summary}}",
-              "rightValue": "",
+              "leftValue": "={{($json.summary || '').trim().length}}",
+              "rightValue": 0,
               "operator": {
-                "type": "string",
-                "operation": "isNotEmpty",
-                "singleValue": true
+                "type": "number",
+                "operation": "gt"
               }
             }
           ],

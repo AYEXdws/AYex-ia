@@ -86,23 +86,19 @@
           },
           "conditions": [
             {
-              "id": "c1",
-              "leftValue": "={{$json.title}}",
-              "rightValue": "",
+              "leftValue": "={{($json.title || '').trim().length}}",
+              "rightValue": 0,
               "operator": {
-                "type": "string",
-                "operation": "isNotEmpty",
-                "singleValue": true
+                "type": "number",
+                "operation": "gt"
               }
             },
             {
-              "id": "c2",
-              "leftValue": "={{$json.summary}}",
-              "rightValue": "",
+              "leftValue": "={{($json.summary || '').trim().length}}",
+              "rightValue": 0,
               "operator": {
-                "type": "string",
-                "operation": "isNotEmpty",
-                "singleValue": true
+                "type": "number",
+                "operation": "gt"
               }
             }
           ],

@@ -446,6 +446,33 @@ def remove_login_and_rewire(doc: dict) -> None:
     connections.pop("Login", None)
 
 
+def set_payload_valid_if(node: dict) -> None:
+    node["parameters"] = {
+        "conditions": {
+            "options": {
+                "caseSensitive": True,
+                "leftValue": "",
+                "typeValidation": "strict",
+                "version": 3,
+            },
+            "conditions": [
+                {
+                    "leftValue": "={{($json.title || '').trim().length}}",
+                    "rightValue": 0,
+                    "operator": {"type": "number", "operation": "gt"},
+                },
+                {
+                    "leftValue": "={{($json.summary || '').trim().length}}",
+                    "rightValue": 0,
+                    "operator": {"type": "number", "operation": "gt"},
+                },
+            ],
+            "combinator": "and",
+        },
+        "options": {},
+    }
+
+
 def build_cyber_v2() -> dict:
     src = ROOT / "Cyber Feed v1-2.json"
     doc = json.loads(src.read_text(encoding="utf-8"))
@@ -455,6 +482,8 @@ def build_cyber_v2() -> dict:
     for node in doc["nodes"]:
         if node.get("name") == "Schedule Trigger":
             node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 15
+        elif node.get("name") == "Payload Valid mi":
+            set_payload_valid_if(node)
         elif node.get("name") == "Limit Latest Items":
             node["parameters"]["maxItems"] = 8
         elif node.get("name") == "Build Cyber Intel Event":
@@ -531,14 +560,16 @@ def main() -> None:
         for node in doc["nodes"]:
             if node.get("name") == build_name:
                 node.setdefault("parameters", {})["jsCode"] = code
+            elif node.get("name") == "Payload Valid mi":
+                set_payload_valid_if(node)
             elif node.get("name") == "Send Event to AYEX":
                 update_send_event(node)
             elif filename == "World News Feed v1.json" and node.get("name") == "Onem Esigi":
                 node["parameters"]["conditions"]["conditions"][0]["rightValue"] = 8
             elif filename == "World News Feed v1.json" and node.get("name") == "Schedule Trigger":
-                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 240
+                node["parameters"]["rule"]["interval"][0] = {"field": "hours", "hoursInterval": 4}
             elif filename == "Macro Economy Feed v1.json" and node.get("name") == "Schedule Trigger":
-                node["parameters"]["rule"]["interval"][0]["minutesInterval"] = 60
+                node["parameters"]["rule"]["interval"][0] = {"field": "hours", "hoursInterval": 1}
         remove_login_and_rewire(doc)
         if filename == "Macro Economy Feed v1.json":
             doc["nodes"].append(
