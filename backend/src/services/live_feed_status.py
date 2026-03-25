@@ -160,6 +160,62 @@ def build_live_inventory(events: list[Any]) -> dict[str, Any]:
     }
 
 
+def build_feed_health(events: list[Any]) -> dict[str, Any]:
+    inventory = build_live_inventory(events)
+    feeds = dict(inventory.get("feeds") or {})
+    policy = {
+        "crypto": {"healthy": 3.0, "warning": 12.0},
+        "equities": {"healthy": 3.0, "warning": 12.0},
+        "macro": {"healthy": 6.0, "warning": 24.0},
+        "world": {"healthy": 12.0, "warning": 48.0},
+        "cyber": {"healthy": 18.0, "warning": 72.0},
+    }
+    rows: dict[str, Any] = {}
+    counts = {"healthy": 0, "warning": 0, "down": 0}
+    stale_feeds: list[str] = []
+    for key, row in feeds.items():
+        age_hours = row.get("age_hours")
+        spec = policy.get(key, {"healthy": 6.0, "warning": 24.0})
+        state = "down"
+        reason = "Veri yok."
+        if row.get("available") and isinstance(age_hours, (int, float)):
+            if age_hours <= spec["healthy"]:
+                state = "healthy"
+                reason = f"Taze veri akisi var ({row.get('freshness')})."
+            elif age_hours <= spec["warning"]:
+                state = "warning"
+                reason = f"Veri akisi yavasladi ({row.get('freshness')})."
+            else:
+                state = "down"
+                reason = f"Feed bayat kaldi ({row.get('freshness')})."
+        label = str(row.get("label") or key).strip()
+        counts[state] += 1
+        if state != "healthy":
+            stale_feeds.append(label)
+        rows[key] = {
+            "label": label,
+            "state": state,
+            "reason": reason,
+            "freshness": row.get("freshness") or "unknown",
+            "count_24h": int(row.get("count_24h") or 0),
+            "latest_at": row.get("latest_at") or "",
+            "source": row.get("source") or "",
+        }
+    summary = "Tum feed'ler saglikli."
+    if counts["down"]:
+        summary = f"{counts['down']} feed durmus veya bayat."
+    elif counts["warning"]:
+        summary = f"{counts['warning']} feed izlenmeli."
+    return {
+        "summary": summary,
+        "healthy_count": counts["healthy"],
+        "warning_count": counts["warning"],
+        "down_count": counts["down"],
+        "stale_feeds": stale_feeds[:5],
+        "feeds": rows,
+    }
+
+
 def render_live_inventory_reply(events: list[Any]) -> str:
     inventory = build_live_inventory(events)
     lines = ["Su an gordugum canli veri yuzeyi soyle:"]

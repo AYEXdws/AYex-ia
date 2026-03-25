@@ -167,6 +167,12 @@ def test_intel_brief_includes_market_focus_cards():
     assert payload["live_inventory"]["feeds"]["crypto"]["available"] is True
     assert payload["live_inventory"]["feeds"]["macro"]["available"] is True
     assert payload["live_inventory"]["feeds"]["cyber"]["available"] is True
+    assert payload["feed_health"]["healthy_count"] >= 3
+    assert payload["feed_health"]["warning_count"] >= 0
+    assert payload["feed_health"]["down_count"] >= 0
+    assert payload["feed_health"]["feeds"]["crypto"]["state"] == "healthy"
+    assert payload["feed_health"]["feeds"]["world"]["state"] in {"healthy", "warning"}
+    assert payload["feed_health"]["feeds"]["cyber"]["state"] in {"healthy", "warning"}
     assert payload["persona_focus"]["assistant_name"] == "AYEX"
     assert payload["persona_focus"]["feedback_style"] == "sert ve net"
     assert payload["decision_history"]

@@ -17,6 +17,7 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
   const marketFocus = intelBrief?.market_focus || null;
   const domainFocus = intelBrief?.domain_focus || null;
   const liveInventory = intelBrief?.live_inventory?.feeds || null;
+  const feedHealth = intelBrief?.feed_health || null;
   const personaFocus = intelBrief?.persona_focus || null;
   const decisionHistory = Array.isArray(intelBrief?.decision_history) ? intelBrief.decision_history : [];
   return (
@@ -156,6 +157,11 @@ export default function StatusPanel({ status, intelBrief, insight, onLogout }) {
       </div>
 
       <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
+        <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">OMURGA SAGLIGI</div>
+        <FeedHealthCard feedHealth={feedHealth} />
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-[var(--line)] bg-[var(--panel-strong)]/70 p-4">
         <div className="mb-3 text-[11px] tracking-[0.18em] text-[var(--muted)]">SON CEVAP IZLERI</div>
         <p className="text-sm leading-6 text-[var(--muted)]">
           {insight?.decision || insight?.briefing || 'Yeni bir cevap geldiginde neden bu yone gittigini burada goreceksin.'}
@@ -258,6 +264,60 @@ function FeedRow({ label, row }) {
         </div>
       </div>
       <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{summary}</div>
+    </div>
+  );
+}
+
+function FeedHealthCard({ feedHealth }) {
+  const rows = feedHealth?.feeds || null;
+  const stale = Array.isArray(feedHealth?.stale_feeds) ? feedHealth.stale_feeds : [];
+
+  if (!rows) {
+    return (
+      <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3 text-sm text-[var(--muted)]">
+        Feed health verisi henuz yok.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3">
+        <div className="text-sm leading-6 text-[var(--text)]">{feedHealth?.summary || 'Durum ozetlenemedi.'}</div>
+        <div className="mt-2 text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+          {feedHealth?.healthy_count || 0} saglikli · {feedHealth?.warning_count || 0} izlenmeli · {feedHealth?.down_count || 0} durmus
+        </div>
+        {stale.length ? (
+          <div className="mt-2 text-sm leading-6 text-[var(--muted)]">
+            Kritik feedler: {stale.join(', ')}
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-3 space-y-2">
+        {['crypto', 'equities', 'macro', 'world', 'cyber'].map((key) => (
+          <FeedHealthRow key={key} row={rows[key]} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FeedHealthRow({ row }) {
+  const label = row?.label || 'Feed';
+  const state = row?.state || 'unknown';
+  const freshness = row?.freshness || 'unknown';
+  const count = row?.count_24h ?? 0;
+  const reason = row?.reason || 'Durum bilgisi yok.';
+
+  return (
+    <div className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-medium text-[var(--text)]">{label}</div>
+        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
+          {state} · {freshness} · {count}/24h
+        </div>
+      </div>
+      <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{reason}</div>
     </div>
   );
 }

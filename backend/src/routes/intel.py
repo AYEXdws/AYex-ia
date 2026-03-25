@@ -9,7 +9,7 @@ from backend.src.intel.intel_service import _is_low_signal_world_event, select_r
 from backend.src.routes.deps import get_services
 from backend.src.services.container import BackendServices
 from backend.src.services.decision_history import build_recent_decisions
-from backend.src.services.live_feed_status import build_live_inventory, build_source_focus
+from backend.src.services.live_feed_status import build_feed_health, build_live_inventory, build_source_focus
 from backend.src.services.market_decision import build_asset_signal_board, build_market_decision
 from backend.src.services.proactive_briefing import build_proactive_briefing
 
@@ -54,6 +54,7 @@ def intel_brief(request: Request, services: BackendServices = Depends(get_servic
         ),
         "domain_focus": _build_domain_focus(inventory_events),
         "live_inventory": build_live_inventory(inventory_events),
+        "feed_health": build_feed_health(inventory_events),
         "persona_focus": _build_persona_focus(profile_data),
         "decision_history": build_recent_decisions(
             getattr(services, "chat_store", None),
