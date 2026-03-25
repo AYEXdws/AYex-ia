@@ -208,7 +208,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{{ JSON.stringify({\n  type: $json.type || 'intel',\n  source: $json.source || 'n8n',\n  payload: {\n    title: $json.title,\n    summary: $json.summary,\n    category: $json.category,\n    importance: $json.importance,\n    tags: $json.tags,\n    timestamp: $json.timestamp || new Date().toISOString()\n  }\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  type: $json.type || 'intel',\n  source: $json.source || 'n8n',\n  payload: {\n    title: $json.title,\n    summary: $json.summary,\n    category: $json.category,\n    importance: $json.importance,\n    tags: $json.tags,\n    timestamp: $json.timestamp || new Date().toISOString()\n  }\n}) }}\n",
         "options": {},
         "bodyContentType": "json",
         "authentication": "none"

@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path("/Users/ayexdws/Desktop")
 REPO_DIR = Path("/Users/ayexdws/ayex-ia/automation/n8n/workflows")
 PLACEHOLDER = "REPLACE_WITH_INGEST_TOKEN"
-WRAPPER = """{{ JSON.stringify({
+WRAPPER = """={{ JSON.stringify({
   type: $json.type || 'intel',
   source: $json.source || 'n8n',
   payload: {
@@ -17,7 +17,7 @@ WRAPPER = """{{ JSON.stringify({
     tags: $json.tags,
     timestamp: $json.timestamp || new Date().toISOString()
   }
-}) }}"""
+}) }}\n"""
 
 MACRO_CODE = """const forexData = $('Get USD/TRY Rate').first().json || {};
 const goldData = $('Get Gold Price').first().json || {};
